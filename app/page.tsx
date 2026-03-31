@@ -1,66 +1,54 @@
-'use client'
+"use client";
 
-import { useState } from 'react'
+import { useEffect, useState } from "react";
+import { Plus } from "lucide-react";
+
+import Navbar from "@/components/Navbar";
+import SearchBar from "@/components/SearchBar";
+import ProjectGrid from "@/components/ProjectGrid";
+import { Button } from "@/components/ui/button";
+import type { Project } from "@/data/mockData";
+import { mapRowToProject } from "@/lib/mapProject";
 
 export default function Home() {
-  const [file, setFile] = useState<File | null>(null)
-  const [projectId, setProjectId] = useState('')
-  const [message, setMessage] = useState('')
+  const [projects, setProjects] = useState<Project[]>([]);
 
-  async function handleUpload() {
-    if (!file || !projectId) {
-      setMessage('请先选择文件并输入 projectId')
-      return
-    }
+  useEffect(() => {
+    let cancelled = false;
 
-    const formData = new FormData()
-    formData.append('file', file)
-    formData.append('projectId', projectId)
+    (async () => {
+      const res = await fetch("/api/projects");
+      const json: unknown = await res.json();
+      if (cancelled || typeof json !== "object" || json === null) return;
+      const body = json as { success?: boolean; data?: unknown };
+      if (!body.success || !Array.isArray(body.data)) return;
+      setProjects(body.data.map((row) => mapRowToProject(row as Record<string, unknown>)));
+    })();
 
-    const res = await fetch('/api/upload', {
-      method: 'POST',
-      body: formData,
-    })
-
-    const result = await res.json()
-
-    if (result.success) {
-      setMessage('上传成功')
-      console.log(result)
-    } else {
-      setMessage(`上传失败: ${result.error}`)
-    }
-  }
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   return (
-    <div style={{ padding: 24 }}>
-      <h1>测试上传</h1>
-
-      <input
-        type="text"
-        placeholder="输入 projectId"
-        value={projectId}
-        onChange={(e) => setProjectId(e.target.value)}
-      />
-
-      <br />
-      <br />
-
-      <input
-        type="file"
-        onChange={(e) => {
-          if (e.target.files?.[0]) {
-            setFile(e.target.files[0])
-          }
-        }}
-      />
-
-      <br />
-      <br />
-
-      <button onClick={handleUpload}>上传</button>
-
-      <p>{message}</p >
+    <div className="min-h-screen bg-surface">
+      <Navbar />
+      <main className="container py-8 space-y-6">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-foreground">Projects</h1>
+            <p className="text-sm text-muted-foreground mt-1">{projects.length} projects</p>
+          </div>
+          <Button>
+            <Plus className="mr-2 h-4 w-4" />
+            Create New Project
+          </Button>
+        </div>
+        <div className="max-w-sm">
+          <SearchBar />
+        </div>
+        <ProjectGrid projects={projects} />
+      </main>
     </div>
-  )
+  );
 }
