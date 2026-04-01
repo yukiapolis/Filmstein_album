@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { X, Copy, ExternalLink, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -13,11 +13,11 @@ interface ShareModalProps {
 
 export default function ShareModal({ open, onClose, projectId, projectName }: ShareModalProps) {
   const [copied, setCopied] = useState(false);
+  const [shareUrl, setShareUrl] = useState(`/share/${projectId}`);
 
-  const shareUrl =
-    typeof window !== "undefined"
-      ? `${window.location.origin}/share/${projectId}`
-      : `/share/${projectId}`;
+  useEffect(() => {
+    setShareUrl(`${window.location.origin}/share/${projectId}`);
+  }, [projectId]);
 
   const handleCopy = async () => {
     try {

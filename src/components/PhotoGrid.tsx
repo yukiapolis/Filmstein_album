@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { FolderOpen, ChevronRight } from "lucide-react";
 import type { Photo, Album } from "@/data/mockData";
 import PhotoCard from "@/components/PhotoCard";
@@ -158,21 +158,32 @@ const PhotoGrid = ({
     );
   }
 
-  // Browse mode
+  // Browse mode (masonry)
+  const columns = useMemo(() => {
+    const colCount = 4;
+    const cols: typeof photos[] = Array.from({ length: colCount }, () => []);
+    photos.forEach((photo, i) => cols[i % colCount].push(photo));
+    return cols;
+  }, [photos]);
+
   return (
     <>
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-        {photos.map((photo, i) => (
-          selectionMode ? (
-            <PhotoCard
-              key={photo.id}
-              photo={photo}
-              selected={isPhotoSelected(photo.id)}
-              onSelect={(s) => onToggleSelect?.(photo.id, s)}
-            />
-          ) : (
-            <PhotoCard key={photo.id} photo={photo} onClick={() => setPreviewIndex(i)} />
-          )
+      <div className="flex gap-4">
+        {columns.map((col, colIdx) => (
+          <div key={colIdx} className="flex flex-1 flex-col gap-4">
+            {col.map((photo) =>
+              selectionMode ? (
+                <PhotoCard
+                  key={photo.id}
+                  photo={photo}
+                  selected={isPhotoSelected(photo.id)}
+                  onSelect={(s) => onToggleSelect?.(photo.id, s)}
+                />
+              ) : (
+                <PhotoCard key={photo.id} photo={photo} onClick={() => setPreviewIndex(photos.indexOf(photo))} />
+              )
+            )}
+          </div>
         ))}
       </div>
       {photos.length === 0 && (

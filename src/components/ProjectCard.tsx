@@ -6,7 +6,6 @@ import type { Project } from "@/data/mockData";
 import StatusBadge from "@/components/StatusBadge";
 
 const ProjectCard = ({ project }: { project: Project }) => {
-  console.log("[DEBUG] ProjectCard cover_url:", project.cover_url, "| id:", project.id);
   return (
     <Link href={`/projects/${project.id}`} className="group block">
       <div className="overflow-hidden rounded-xl border border-border bg-card transition-shadow hover:shadow-md">

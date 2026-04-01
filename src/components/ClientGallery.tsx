@@ -3,14 +3,15 @@
 import { useState, useMemo, useEffect } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { Download, Heart, ArrowLeft } from "lucide-react";
+import { Download, ArrowLeft, Loader2 } from "lucide-react";
 import type { Photo } from "@/data/mockData";
 import PhotoPreviewModal from "@/components/PhotoPreviewModal";
+import PhotoCard from "@/components/PhotoCard";
 import { Button } from "@/components/ui/button";
 
-const EmptyState = () => (
+const EmptyState = ({ message }: { message?: string }) => (
   <div className="flex flex-col items-center justify-center py-20 text-center">
-    <p className="text-sm text-muted-foreground">No photos yet.</p>
+    <p className="text-sm text-muted-foreground">{message ?? "No photos yet."}</p>
   </div>
 );
 
@@ -36,18 +37,26 @@ const ClientGallery = ({ photos: externalPhotos }: { photos?: Photo[] }) => {
 
     (async () => {
       try {
-        const res = await fetch(`/api/projects/${id}`);
-        const body = await res.json();
-
-        if (!res.ok || body.success !== true) {
-          if (!cancelled) setError("Could not load photos.");
-          return;
-        }
+        const [projRes, foldersRes] = await Promise.all([
+          fetch(`/api/projects/${id}`),
+          fetch(`/api/projects/${id}/folders`),
+        ]);
+        const projBody = await projRes.json();
+        const foldersBody = await foldersRes.json();
 
         if (!cancelled) {
-          const fetched = (body.data?.photos ?? []) as Photo[];
-          setPhotos(fetched);
-          setProjectName(body.data?.project?.name ?? null);
+          if (projRes.ok && projBody.success === true) {
+            const fetched = (projBody.data?.photos ?? []) as Photo[];
+            setPhotos(fetched);
+            setProjectName(projBody.data?.project?.name ?? null);
+          } else {
+            setError("Could not load photos.");
+            return;
+          }
+
+          if (foldersRes.ok && foldersBody.success === true) {
+            setFolders(foldersBody.data ?? []);
+          }
         }
       } catch {
         if (!cancelled) setError("Could not load photos.");
@@ -63,17 +72,29 @@ const ClientGallery = ({ photos: externalPhotos }: { photos?: Photo[] }) => {
     id ? `Project ${id}` : "Project"
   );
 
-  /** Derive unique tag values from the actual photos being displayed. */
-  const allTags = useMemo(
-    () => Array.from(new Set(photos.map((p) => p.tag))),
-    [photos],
-  );
-
   const [selections, setSelections] = useState<Set<string>>(
     new Set(photos.filter((p) => p.selected).map((p) => p.id)),
   );
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
   const [activeTag, setActiveTag] = useState<string>("all");
+  const [downloading, setDownloading] = useState(false);
+  const [folders, setFolders] = useState<{ id: string; name: string }[]>([]);
+  const [activeFolder, setActiveFolder] = useState<string>("all");
+
+  /** Photos visible after folder filter only (used to derive tags). */
+  const folderFiltered = useMemo(
+    () =>
+      activeFolder === "all"
+        ? photos
+        : photos.filter((p) => p.folderId === activeFolder),
+    [photos, activeFolder],
+  );
+
+  /** Derive unique tag values from the folder-filtered photos. */
+  const allTags = useMemo(
+    () => Array.from(new Set(folderFiltered.map((p) => p.tag))),
+    [folderFiltered],
+  );
 
   const toggleSelect = (photoId: string) => {
     setSelections((prev) => {
@@ -84,12 +105,44 @@ const ClientGallery = ({ photos: externalPhotos }: { photos?: Photo[] }) => {
     });
   };
 
+  const downloadSelected = async () => {
+    if (selections.size === 0) return;
+
+    setDownloading(true);
+    try {
+      const photoIds = Array.from(selections);
+      const res = await fetch("/api/photos/download-zip", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ photoIds }),
+      });
+
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.error || "Download failed");
+      }
+
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "photos.zip";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("Download error:", err);
+      alert(err instanceof Error ? err.message : "Download failed");
+    } finally {
+      setDownloading(false);
+    }
+  };
+
   const filtered = useMemo(
     () =>
-      activeTag === "all"
-        ? photos
-        : photos.filter((p) => p.tag === activeTag),
-    [activeTag, photos],
+      folderFiltered.filter((p) => activeTag === "all" || p.tag === activeTag),
+    [folderFiltered, activeTag],
   );
 
   /** Build an index map so we can map a photo id to its position in `filtered`. */
@@ -125,7 +178,49 @@ const ClientGallery = ({ photos: externalPhotos }: { photos?: Photo[] }) => {
           </div>
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <span>{selections.size} selected</span>
-            <Button size="sm" variant="outline">
+            {selections.size > 0 && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={downloadSelected}
+                disabled={downloading}
+              >
+                {downloading ? (
+                  <>
+                    <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                    Downloading...
+                  </>
+                ) : (
+                  <>
+                    <Download className="mr-1.5 h-3.5 w-3.5" />
+                    Download Selected
+                  </>
+                )}
+              </Button>
+            )}
+            <Button size="sm" variant="outline" onClick={() => {
+              if (filtered.length === 0) return;
+              setDownloading(true);
+              const photoIds = filtered.map((p) => p.id);
+              fetch("/api/photos/download-zip", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ photoIds }),
+              })
+                .then((res) => res.blob())
+                .then((blob) => {
+                  const url = window.URL.createObjectURL(blob);
+                  const a = document.createElement("a");
+                  a.href = url;
+                  a.download = "photos.zip";
+                  document.body.appendChild(a);
+                  a.click();
+                  document.body.removeChild(a);
+                  window.URL.revokeObjectURL(url);
+                })
+                .catch(console.error)
+                .finally(() => setDownloading(false));
+            }}>
               <Download className="mr-1.5 h-3.5 w-3.5" />
               Download All
             </Button>
@@ -138,6 +233,8 @@ const ClientGallery = ({ photos: externalPhotos }: { photos?: Photo[] }) => {
           <p className="py-12 text-center text-sm text-muted-foreground">Loading photos…</p>
         ) : error ? (
           <p className="py-12 text-center text-sm text-destructive" role="alert">{error}</p>
+        ) : filtered.length === 0 && activeFolder !== "all" ? (
+          <EmptyState message="No photos in this folder yet." />
         ) : photos.length === 0 ? (
           <EmptyState />
         ) : (
@@ -148,6 +245,37 @@ const ClientGallery = ({ photos: externalPhotos }: { photos?: Photo[] }) => {
                 {photos.length} photos &middot; Select your favorites to let us know which ones you love.
               </p>
             </div>
+
+            {/* Folder filter tabs */}
+            {folders.length > 0 && (
+              <div className="mb-4 flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setActiveFolder("all")}
+                  className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                    activeFolder === "all"
+                      ? "bg-primary text-primary-foreground"
+                      : "bg-muted text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  All
+                </button>
+                {folders.map((folder) => (
+                  <button
+                    key={folder.id}
+                    type="button"
+                    onClick={() => setActiveFolder(folder.id)}
+                    className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                      activeFolder === folder.id
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-muted text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    {folder.name}
+                  </button>
+                ))}
+              </div>
+            )}
 
             {/* Tag filter pills */}
             <div className="mb-6 flex flex-wrap items-center gap-2">
@@ -182,52 +310,17 @@ const ClientGallery = ({ photos: externalPhotos }: { photos?: Photo[] }) => {
             <div className="flex gap-3">
               {columns.map((col, colIdx) => (
                 <div key={colIdx} className="flex flex-1 flex-col gap-3">
-                  {col.map((photo) => {
-                    // Vary aspect ratios for visual interest (deterministic by id)
-                    const n = parseInt(photo.id, 10) % 3;
-                    const aspectClass = n === 0
-                      ? "aspect-[3/4]"
-                      : n === 1
-                        ? "aspect-[4/3]"
-                        : "aspect-square";
-
-                    return (
-                      <div
-                        key={photo.id}
-                        className="group relative overflow-hidden rounded-lg bg-muted cursor-pointer"
-                      >
-                        {/* Photo image — click opens lightbox */}
-                        <div
-                          className={`${aspectClass} overflow-hidden`}
-                          onClick={() =>
-                            setPreviewIndex(photoIndexMap.get(photo.id) ?? 0)
-                          }
-                        >
-                          <img
-                            src={photo.url}
-                            alt={photo.fileName}
-                            className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
-                            loading="lazy"
-                          />
-                        </div>
-
-                        {/* Heart / select overlay */}
-                        <button
-                          type="button"
-                          onClick={() => toggleSelect(photo.id)}
-                          className={`absolute top-2 right-2 flex h-7 w-7 items-center justify-center rounded-full transition-all ${
-                            selections.has(photo.id)
-                              ? "bg-primary text-primary-foreground"
-                              : "bg-black/30 text-white opacity-0 group-hover:opacity-100"
-                          }`}
-                        >
-                          <Heart
-                            className={`h-3.5 w-3.5 ${selections.has(photo.id) ? "fill-current" : ""}`}
-                          />
-                        </button>
-                      </div>
-                    );
-                  })}
+                  {col.map((photo) => (
+                    <PhotoCard
+                      key={photo.id}
+                      photo={photo}
+                      selected={selections.has(photo.id)}
+                      onSelect={() => toggleSelect(photo.id)}
+                      onClick={() =>
+                        setPreviewIndex(photoIndexMap.get(photo.id) ?? 0)
+                      }
+                    />
+                  ))}
                 </div>
               ))}
             </div>
