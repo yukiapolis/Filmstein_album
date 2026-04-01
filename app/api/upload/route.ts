@@ -8,6 +8,8 @@ export async function POST(req: Request) {
     const formData = await req.formData();
     const file = formData.get("file") as File | null;
     const projectId = formData.get("projectId") as string | null;
+    const folder = formData.get("folder") as string | null;
+    const folderId = formData.get("folderId") as string | null;
 
     if (!file) {
       return new Response(JSON.stringify({
@@ -33,13 +35,20 @@ export async function POST(req: Request) {
 
     // Only insert into photos table when a projectId is provided (photo upload path)
     if (projectId) {
+      const insertData: Record<string, unknown> = {
+        project_id: projectId,
+        file_name: file.name,
+        file_url: url,
+      };
+
+      // Primary: use folder_id if provided
+      if (folderId) {
+        insertData.folder_id = folderId;
+      }
+
       const { error } = await supabase
         .from("photos")
-        .insert([{
-          project_id: projectId,
-          file_name: file.name,
-          file_url: url,
-        }]);
+        .insert([insertData]);
 
       if (error) {
         return new Response(JSON.stringify({

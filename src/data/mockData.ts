@@ -34,6 +34,8 @@ export interface Photo {
   colorLabel: ColorLabel;
   uploadedAt: string;
   albumId?: string;
+  folder?: string;
+  folderId?: string;
 }
 
 export interface UploadFile {

@@ -28,5 +28,7 @@ export function mapRowToPhoto(row: Record<string, unknown>) {
     photoStatus: toStringValue(row.photo_status) || "original",
     colorLabel: toStringValue(row.color_label) || "none",
     albumId: toStringValue(row.album_id) || undefined,
+    folder: toStringValue(row.folder) || undefined,
+    folderId: toStringValue(row.folder_id) || undefined,
   };
 }

@@ -8,13 +8,24 @@ import PhotoStatusBadge from "@/components/PhotoStatusBadge";
 interface PhotoCardProps {
   photo: Photo;
   onClick?: () => void;
+  /** Selection mode */
+  selected?: boolean;
+  onSelect?: (selected: boolean) => void;
 }
 
-const PhotoCard = ({ photo, onClick }: PhotoCardProps) => {
+const PhotoCard = ({ photo, onClick, selected, onSelect }: PhotoCardProps) => {
   const colorInfo = photo.colorLabel !== "none" ? colorLabelMap[photo.colorLabel] : null;
 
+  const handleCheckboxClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onSelect?.(!selected);
+  };
+
   return (
-    <div className="group relative overflow-hidden rounded-lg bg-muted cursor-pointer" onClick={onClick}>
+    <div
+      className="group relative overflow-hidden rounded-lg bg-muted cursor-pointer"
+      onClick={onClick}
+    >
       <div className="aspect-[4/3] overflow-hidden">
         <img
           src={photo.url}
@@ -23,11 +34,29 @@ const PhotoCard = ({ photo, onClick }: PhotoCardProps) => {
           loading="lazy"
         />
       </div>
-      {photo.selected && (
+
+      {/* Selection checkbox */}
+      {onSelect !== undefined && (
+        <button
+          type="button"
+          onClick={handleCheckboxClick}
+          className={`absolute top-2 right-2 h-6 w-6 rounded-md border-2 flex items-center justify-center transition-colors ${
+            selected
+              ? "bg-primary border-primary"
+              : "bg-black/40 border-white/60 hover:border-white"
+          }`}
+        >
+          {selected && <Check className="h-3.5 w-3.5 text-primary-foreground" />}
+        </button>
+      )}
+
+      {/* Legacy selected indicator (when selection mode is not active) */}
+      {selected === undefined && photo.selected && (
         <div className="absolute top-2 right-2 h-6 w-6 rounded-full bg-primary flex items-center justify-center">
           <Check className="h-3.5 w-3.5 text-primary-foreground" />
         </div>
       )}
+
       {colorInfo && (
         <div className={`absolute top-2 left-2 h-3.5 w-3.5 rounded-full ${colorInfo.bg} ring-2 ring-white/80`} />
       )}

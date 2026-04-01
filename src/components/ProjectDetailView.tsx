@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useEffect, useCallback } from "react";
 import Link from "next/link";
-import { ArrowLeft, Upload, Share2, Calendar, User, LayoutGrid, List, Columns3, Eye, Pencil } from "lucide-react";
+import { ArrowLeft, Upload, Share2, Calendar, User, LayoutGrid, List, Columns3, Eye, Pencil, Folder, Plus, X, Move, Check } from "lucide-react";
 import Navbar from "@/components/Navbar";
 import PhotoGrid, { type ViewMode } from "@/components/PhotoGrid";
 import StatusBadge from "@/components/StatusBadge";
@@ -16,6 +16,11 @@ import { buildAlbumsFromPhotos } from "@/lib/albumsFromPhotos";
 import { Button } from "@/components/ui/button";
 
 const tabs = ["Photos", "Selections"] as const;
+
+interface FolderItem {
+  id: string;
+  name: string;
+}
 
 const getAllAlbumIds = (albums: Album[]): string[] =>
   albums.flatMap((a) => [a.id, ...(a.children ? getAllAlbumIds(a.children) : [])]);
@@ -62,6 +67,30 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
   const [colorFilter, setColorFilter] = useState<ColorLabel | "all">("all");
   const [expandedAlbums, setExpandedAlbums] = useState<Set<string>>(new Set());
   const [viewMode, setViewMode] = useState<ViewMode>("browse");
+  const [folders, setFolders] = useState<FolderItem[]>([]);
+  const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
+  const [showNewFolder, setShowNewFolder] = useState(false);
+  const [newFolderName, setNewFolderName] = useState("");
+
+  // Selection state
+  const [selectedPhotoIds, setSelectedPhotoIds] = useState<Set<string>>(new Set());
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [moveTargetFolderId, setMoveTargetFolderId] = useState<string>("");
+  const [moving, setMoving] = useState(false);
+
+  /** Re-fetch folders from API */
+  const refreshFolders = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/projects/${projectId}/folders`);
+      if (!res.ok) return;
+      const body = await res.json();
+      if (body.success && Array.isArray(body.data)) {
+        setFolders(body.data);
+      }
+    } catch {
+      // Silently ignore
+    }
+  }, [projectId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -74,34 +103,42 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
       setPhotos([]);
 
       try {
-        const res = await fetch(`/api/projects/${projectId}`);
-        let json: unknown = {};
-        try {
-          json = await res.json();
-        } catch {
-          json = {};
-        }
+        const [projectRes, foldersRes] = await Promise.all([
+          fetch(`/api/projects/${projectId}`),
+          fetch(`/api/projects/${projectId}/folders`),
+        ]);
+
         if (cancelled) return;
 
-        if (res.status === 404) {
+        if (projectRes.status === 404) {
           setNotFound(true);
           return;
         }
 
-        const body = json as {
+        const projectJson: unknown = await projectRes.json().catch(() => ({}));
+        const foldersJson: unknown = await foldersRes.json().catch(() => ({}));
+
+        const projectBody = projectJson as {
           success?: boolean;
           error?: string;
           data?: { project?: Project; photos?: unknown };
         };
+        const foldersBody = foldersJson as {
+          success?: boolean;
+          data?: FolderItem[];
+        };
 
-        if (!res.ok || body.success === false) {
-          setError(body.error ?? `Request failed (${res.status})`);
+        if (projectRes.status >= 400 || projectBody.success === false) {
+          setError(projectBody.error ?? `Request failed (${projectRes.status})`);
           return;
         }
 
-        if (body.data?.project && Array.isArray(body.data.photos)) {
-          setProject(body.data.project);
-          setPhotos(body.data.photos as Photo[]);
+        if (projectBody.data?.project && Array.isArray(projectBody.data.photos)) {
+          setProject(projectBody.data.project);
+          setPhotos(projectBody.data.photos as Photo[]);
+          if (foldersBody.success && Array.isArray(foldersBody.data)) {
+            setFolders(foldersBody.data);
+          }
         } else {
           setError("Invalid response from server");
         }
@@ -144,8 +181,13 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
       list = list.filter((p) => p.colorLabel === colorFilter);
     }
 
+    // Filter by selected folder (folder_id only)
+    if (selectedFolderId) {
+      list = list.filter((p) => p.folderId === selectedFolderId);
+    }
+
     return list;
-  }, [activeAlbum, activeTab, colorFilter, photos, albumsForUi]);
+  }, [activeAlbum, activeTab, colorFilter, photos, albumsForUi, selectedFolderId]);
 
   const childAlbums = useMemo(() => getChildAlbums(albumsForUi, activeAlbum), [activeAlbum, albumsForUi]);
 
@@ -189,6 +231,79 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
       // Silently ignore refresh errors — the upload itself already surfaced failures.
     }
   }, [projectId]);
+
+  /** Create folder via API, refresh list, stay on All Photos */
+  const handleCreateFolder = async (name: string) => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+
+    try {
+      const res = await fetch(`/api/projects/${projectId}/folders`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: trimmed }),
+      });
+      const body = await res.json();
+      if (body.success) {
+        await refreshFolders();
+      }
+    } catch {
+      // Silently ignore
+    }
+  };
+
+  // Selection handlers
+  const togglePhotoSelection = useCallback((photoId: string, selected: boolean) => {
+    setSelectedPhotoIds((prev) => {
+      const next = new Set(prev);
+      if (selected) {
+        next.add(photoId);
+      } else {
+        next.delete(photoId);
+      }
+      return next;
+    });
+  }, []);
+
+  const enterSelectionMode = useCallback(() => {
+    setSelectionMode(true);
+    setSelectedPhotoIds(new Set());
+  }, []);
+
+  const exitSelectionMode = useCallback(() => {
+    setSelectionMode(false);
+    setSelectedPhotoIds(new Set());
+    setMoveTargetFolderId("");
+  }, []);
+
+  // Batch move photos
+  const handleBatchMove = async () => {
+    if (selectedPhotoIds.size === 0) return;
+
+    setMoving(true);
+    try {
+      const folderId = moveTargetFolderId === "" ? null : moveTargetFolderId;
+      const res = await fetch("/api/photos", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          photoIds: Array.from(selectedPhotoIds),
+          folderId,
+        }),
+      });
+      const body = await res.json();
+      if (body.success) {
+        await refreshPhotos();
+        exitSelectionMode();
+      } else {
+        console.error("Move failed:", body.error);
+      }
+    } catch (err) {
+      console.error("Move error:", err);
+    } finally {
+      setMoving(false);
+    }
+  };
 
   const heading = loading
     ? "Loading…"
@@ -235,6 +350,25 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
           </div>
 
           <div className="flex items-center gap-2">
+            {!selectionMode ? (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={enterSelectionMode}
+                disabled={loading || Boolean(error) || notFound}
+              >
+                <Check className="mr-2 h-4 w-4" />
+                Select
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={exitSelectionMode}
+              >
+                Cancel
+              </Button>
+            )}
             <Button
               type="button"
               onClick={() => setUploadOpen(true)}
@@ -271,6 +405,32 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
             </Button>
           </div>
         </div>
+
+        {/* Batch Action Bar */}
+        {selectionMode && selectedPhotoIds.size > 0 && (
+          <div className="flex items-center gap-3 p-3 bg-primary/5 border border-primary/20 rounded-lg">
+            <span className="text-sm font-medium">
+              {selectedPhotoIds.size} selected
+            </span>
+            <div className="flex items-center gap-2 flex-1">
+              <Folder className="h-4 w-4 text-muted-foreground" />
+              <select
+                value={moveTargetFolderId}
+                onChange={(e) => setMoveTargetFolderId(e.target.value)}
+                className="h-8 rounded-md border border-input bg-background px-2 py-1 text-sm"
+              >
+                <option value="">All Photos</option>
+                {folders.map((f) => (
+                  <option key={f.id} value={f.id}>{f.name}</option>
+                ))}
+              </select>
+            </div>
+            <Button size="sm" onClick={handleBatchMove} disabled={moving}>
+              <Move className="mr-1 h-4 w-4" />
+              {moving ? "Moving..." : "Move"}
+            </Button>
+          </div>
+        )}
 
         <div className={`border-b border-border ${loading ? "opacity-60 pointer-events-none" : ""}`}>
           <div className="flex gap-6">
@@ -318,6 +478,50 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
           </div>
         </div>
 
+        {/* New Folder Input */}
+        {showNewFolder && (
+          <div className="flex items-center gap-3 p-3 bg-muted/50 rounded-lg border border-border">
+            <Folder className="h-4 w-4 text-muted-foreground" />
+            <input
+              type="text"
+              value={newFolderName}
+              onChange={(e) => setNewFolderName(e.target.value)}
+              placeholder="Enter folder name"
+              className="flex-1 h-8 rounded-md border border-input bg-background px-3 py-1 text-sm"
+              onKeyDown={async (e) => {
+                if (e.key === "Enter" && newFolderName.trim()) {
+                  await handleCreateFolder(newFolderName);
+                  setNewFolderName("");
+                  setShowNewFolder(false);
+                }
+                if (e.key === "Escape") {
+                  setShowNewFolder(false);
+                  setNewFolderName("");
+                }
+              }}
+              autoFocus
+            />
+            <Button
+              size="sm"
+              type="button"
+              onClick={async () => {
+                await handleCreateFolder(newFolderName);
+                setNewFolderName("");
+                setShowNewFolder(false);
+              }}
+            >
+              Create
+            </Button>
+            <button
+              type="button"
+              onClick={() => { setShowNewFolder(false); setNewFolderName(""); }}
+              className="text-muted-foreground hover:text-foreground"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        )}
+
         {!showSidebar && (
           <div className="flex items-center gap-1.5 text-sm">
             <button
@@ -344,15 +548,72 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
 
         <div className="flex gap-6">
           {showSidebar && (
-            <div className="hidden md:block w-52 shrink-0">
-              <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Albums</h3>
-              <AlbumTree
-                albums={albumsForUi}
-                activeAlbumId={activeAlbum}
-                onSelect={setActiveAlbum}
-                expandedIds={expandedAlbums}
-                onToggle={toggleExpand}
-              />
+            <div className="hidden md:block w-52 shrink-0 space-y-6">
+              {/* Albums Tree */}
+              <div>
+                <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Albums</h3>
+                <AlbumTree
+                  albums={albumsForUi}
+                  activeAlbumId={activeAlbum}
+                  onSelect={setActiveAlbum}
+                  expandedIds={expandedAlbums}
+                  onToggle={toggleExpand}
+                />
+              </div>
+
+              {/* Folders List */}
+              <div>
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Folders</h3>
+                  <button
+                    type="button"
+                    onClick={() => setShowNewFolder(true)}
+                    className="text-muted-foreground hover:text-foreground"
+                    title="New Folder"
+                  >
+                    <Plus className="h-4 w-4" />
+                  </button>
+                </div>
+                <div className="space-y-1">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedFolderId(null)}
+                    className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm transition-colors ${
+                      selectedFolderId === null
+                        ? "bg-primary/10 text-primary font-medium"
+                        : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                    }`}
+                  >
+                    <Folder className="h-4 w-4" />
+                    <span className="flex-1 text-left">All Photos</span>
+                    <span className="text-xs text-muted-foreground">{photos.length}</span>
+                  </button>
+                  {folders.map((folder) => {
+                    const count = photos.filter((p) => p.folderId === folder.id).length;
+                    return (
+                      <button
+                        key={folder.id}
+                        type="button"
+                        onClick={() => setSelectedFolderId(selectedFolderId === folder.id ? null : folder.id)}
+                        className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm transition-colors ${
+                          selectedFolderId === folder.id
+                            ? "bg-primary/10 text-primary font-medium"
+                            : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                        }`}
+                      >
+                        <Folder className="h-4 w-4" />
+                        <span className="flex-1 text-left truncate">{folder.name}</span>
+                        <span className="text-xs text-muted-foreground">({count})</span>
+                      </button>
+                    );
+                  })}
+                  {folders.length === 0 && (
+                    <p className="px-2 py-1.5 text-xs text-muted-foreground">
+                      No folders yet. Click + to create one.
+                    </p>
+                  )}
+                </div>
+              </div>
             </div>
           )}
 
@@ -369,6 +630,9 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
                 viewMode={viewMode}
                 albums={viewMode !== "browse" ? childAlbums : []}
                 onAlbumClick={handleAlbumClick}
+                selectionMode={selectionMode}
+                selectedIds={Array.from(selectedPhotoIds)}
+                onToggleSelect={togglePhotoSelection}
               />
             ) : (
               <p className="py-12 text-center text-sm text-muted-foreground">No photos match the current filters.</p>
@@ -381,6 +645,8 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
         open={uploadOpen}
         onClose={() => setUploadOpen(false)}
         projectId={projectId}
+        folders={folders}
+        onFolderCreated={refreshFolders}
         onUploadDone={refreshPhotos}
       />
 
