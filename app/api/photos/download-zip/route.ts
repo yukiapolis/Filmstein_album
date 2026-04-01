@@ -130,11 +130,16 @@ export async function POST(request: NextRequest) {
     });
     console.log(`[download-zip] Zip buffer size: ${zipBuffer.length} bytes`);
 
+    if (!zipBuffer || zipBuffer.length === 0) {
+      console.error("[download-zip] Zip buffer is empty");
+      return new Response("Zip generation failed", { status: 500 });
+    }
+
     console.log("[download-zip] === SUCCESS - returning zip ===");
-    return new Response(zipBuffer, {
+    return new Response(new Uint8Array(zipBuffer), {
       headers: {
         "Content-Type": "application/zip",
-        "Content-Disposition": `attachment; filename="photos.zip"`,
+        "Content-Disposition": "attachment; filename=photos.zip",
         "Content-Length": zipBuffer.length.toString(),
       },
     });
