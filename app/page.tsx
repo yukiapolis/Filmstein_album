@@ -1,21 +1,31 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { Plus } from "lucide-react";
 
 import Navbar from "@/components/Navbar";
 import SearchBar from "@/components/SearchBar";
 import ProjectGrid from "@/components/ProjectGrid";
 import { Button } from "@/components/ui/button";
+import CreateProjectDialog from "@/components/CreateProjectDialog";
 import type { Project } from "@/data/mockData";
 import { mapRowToProject } from "@/lib/mapProject";
 
 export default function Home() {
   const [projects, setProjects] = useState<Project[]>([]);
+  const [dialogOpen, setDialogOpen] = useState(false);
+
+  const refreshProjects = useCallback(async () => {
+    const res = await fetch("/api/projects");
+    const json: unknown = await res.json();
+    if (typeof json !== "object" || json === null) return;
+    const body = json as { success?: boolean; data?: unknown };
+    if (!body.success || !Array.isArray(body.data)) return;
+    setProjects(body.data.map((row) => mapRowToProject(row as Record<string, unknown>)));
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
-
     (async () => {
       const res = await fetch("/api/projects");
       const json: unknown = await res.json();
@@ -24,7 +34,6 @@ export default function Home() {
       if (!body.success || !Array.isArray(body.data)) return;
       setProjects(body.data.map((row) => mapRowToProject(row as Record<string, unknown>)));
     })();
-
     return () => {
       cancelled = true;
     };
@@ -39,7 +48,7 @@ export default function Home() {
             <h1 className="text-2xl font-bold text-foreground">Projects</h1>
             <p className="text-sm text-muted-foreground mt-1">{projects.length} projects</p>
           </div>
-          <Button>
+          <Button onClick={() => setDialogOpen(true)}>
             <Plus className="mr-2 h-4 w-4" />
             Create New Project
           </Button>
@@ -49,6 +58,12 @@ export default function Home() {
         </div>
         <ProjectGrid projects={projects} />
       </main>
+
+      <CreateProjectDialog
+        open={dialogOpen}
+        onClose={() => setDialogOpen(false)}
+        onSuccess={refreshProjects}
+      />
     </div>
   );
 }

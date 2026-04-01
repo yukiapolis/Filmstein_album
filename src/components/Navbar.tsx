@@ -12,7 +12,6 @@ const Navbar = () => {
         <nav className="flex items-center gap-6 text-sm text-muted-foreground">
           <Link href="/" className="hover:text-foreground transition-colors">Projects</Link>
           <Link href="/editor" className="hover:text-foreground transition-colors">Editor</Link>
-          <Link href="/editor" className="hover:text-foreground transition-colors">Editor</Link>
           <div className="ml-4 h-8 w-8 rounded-full bg-primary flex items-center justify-center text-primary-foreground text-xs font-medium">
             JD
           </div>

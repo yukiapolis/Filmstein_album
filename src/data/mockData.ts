@@ -39,7 +39,7 @@ export interface UploadFile {
   id: string;
   fileName: string;
   size: string;
-  status: "Uploading" | "Completed" | "Failed";
+  status: "Pending" | "Uploading" | "Completed" | "Failed";
   progress: number;
 }
 

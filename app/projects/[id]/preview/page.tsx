@@ -1,19 +1,13 @@
-import Link from "next/link";
+import ClientGallery from "@/components/ClientGallery";
 
 type PageProps = {
   params: Promise<{ id: string }>;
 };
 
-/** Placeholder so Preview from project detail resolves; migrate ClientGallery later. */
+/** Preview page at /projects/[id]/preview.
+ *  Renders the client-facing gallery backed by mock data for now.
+ *  When a real API is wired, pass the fetched photos as a prop to <ClientGallery>. */
 export default async function ProjectPreviewPage({ params }: PageProps) {
   const { id } = await params;
-  return (
-    <div className="container py-8 space-y-4">
-      <Link href={`/projects/${id}`} className="text-sm text-muted-foreground hover:text-foreground">
-        ← Back to project
-      </Link>
-      <h1 className="text-2xl font-bold text-foreground">Preview</h1>
-      <p className="text-sm text-muted-foreground">Project ID: {id}</p>
-    </div>
-  );
+  return <ClientGallery />;
 }
