@@ -8,9 +8,12 @@ export function mapRowToPhoto(row: Record<string, unknown>) {
   const fileUrl = toStringValue(row.file_url);
   const path = toStringValue(row.path);
 
-  const url =
-    fileUrl ||
-    (path ? `${R2_BASE_URL}/${path.replace(/^\/+/, "")}` : "");
+  let url = "";
+  if (fileUrl && fileUrl.startsWith("http")) {
+    url = fileUrl;
+  } else if (path) {
+    url = `${R2_BASE_URL}/${path.replace(/^\/+/, "")}`;
+  }
 
   return {
     id: toStringValue(row.id),
