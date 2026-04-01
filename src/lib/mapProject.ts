@@ -1,7 +1,6 @@
 import type { Project, ProjectStatus, ProjectType } from "@/data/mockData";
 
-const FALLBACK_COVER =
-  "https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=600&h=400&fit=crop";
+const FALLBACK_COVER = "/default-cover.svg";
 
 const PROJECT_TYPES: ProjectType[] = ["Wedding", "Event", "Campaign"];
 const PROJECT_STATUSES: ProjectStatus[] = ["Draft", "Reviewing", "Delivered"];
@@ -62,7 +61,7 @@ export function mapRowToProject(row: Record<string, unknown>): Project {
     name,
     type: asProjectType(row.type),
     date,
-    coverUrl,
+    cover_url: coverUrl,
     photoCount,
     status: asProjectStatus(row.status),
     clientName,

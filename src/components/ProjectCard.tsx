@@ -6,12 +6,13 @@ import type { Project } from "@/data/mockData";
 import StatusBadge from "@/components/StatusBadge";
 
 const ProjectCard = ({ project }: { project: Project }) => {
+  console.log("[DEBUG] ProjectCard cover_url:", project.cover_url, "| id:", project.id);
   return (
     <Link href={`/projects/${project.id}`} className="group block">
       <div className="overflow-hidden rounded-xl border border-border bg-card transition-shadow hover:shadow-md">
         <div className="relative aspect-[3/2] overflow-hidden bg-muted">
           <img
-            src={project.coverUrl}
+            src={project.cover_url}
             alt={project.name}
             className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
           />

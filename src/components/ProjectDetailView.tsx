@@ -2,13 +2,15 @@
 
 import { useState, useMemo, useEffect, useCallback } from "react";
 import Link from "next/link";
-import { ArrowLeft, Upload, Share2, Calendar, User, LayoutGrid, List, Columns3, Eye } from "lucide-react";
+import { ArrowLeft, Upload, Share2, Calendar, User, LayoutGrid, List, Columns3, Eye, Pencil } from "lucide-react";
 import Navbar from "@/components/Navbar";
 import PhotoGrid, { type ViewMode } from "@/components/PhotoGrid";
 import StatusBadge from "@/components/StatusBadge";
 import AlbumTree from "@/components/AlbumTree";
 import ColorFilterBar from "@/components/ColorFilterBar";
 import UploadPanel from "@/components/UploadPanel";
+import ProjectEditDialog from "@/components/ProjectEditDialog";
+import ShareModal from "@/components/ShareModal";
 import type { ColorLabel, Album, Project, Photo } from "@/data/mockData";
 import { buildAlbumsFromPhotos } from "@/lib/albumsFromPhotos";
 import { Button } from "@/components/ui/button";
@@ -54,6 +56,8 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<string>("Photos");
   const [uploadOpen, setUploadOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
   const [activeAlbum, setActiveAlbum] = useState("all");
   const [colorFilter, setColorFilter] = useState<ColorLabel | "all">("all");
   const [expandedAlbums, setExpandedAlbums] = useState<Set<string>>(new Set());
@@ -239,6 +243,15 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
               <Upload className="mr-2 h-4 w-4" />
               Upload Photos
             </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setEditOpen(true)}
+              disabled={loading || Boolean(error) || notFound}
+            >
+              <Pencil className="mr-2 h-4 w-4" />
+              Edit Project
+            </Button>
             <Button variant="outline" asChild>
               <Link
                 href={`/projects/${projectId}/preview`}
@@ -252,7 +265,7 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
                 Preview
               </Link>
             </Button>
-            <Button variant="outline" type="button" disabled title="Coming soon">
+            <Button variant="outline" type="button" onClick={() => setShareOpen(true)} disabled={loading || Boolean(error) || notFound}>
               <Share2 className="mr-2 h-4 w-4" />
               Share
             </Button>
@@ -370,6 +383,24 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
         projectId={projectId}
         onUploadDone={refreshPhotos}
       />
+
+      {project && (
+        <ProjectEditDialog
+          open={editOpen}
+          onClose={() => setEditOpen(false)}
+          project={project}
+          onSaved={(updated) => setProject(updated)}
+        />
+      )}
+
+      {project && (
+        <ShareModal
+          open={shareOpen}
+          onClose={() => setShareOpen(false)}
+          projectId={project.id}
+          projectName={project.name}
+        />
+      )}
     </div>
   );
 }

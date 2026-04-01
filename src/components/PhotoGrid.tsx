@@ -5,6 +5,7 @@ import { FolderOpen, ChevronRight } from "lucide-react";
 import type { Photo, Album } from "@/data/mockData";
 import PhotoCard from "@/components/PhotoCard";
 import PhotoPreviewModal from "@/components/PhotoPreviewModal";
+import EmptyPhotosState from "@/components/EmptyPhotosState";
 
 export type ViewMode = "browse" | "grid" | "list";
 
@@ -19,6 +20,7 @@ const PhotoGrid = ({ photos, viewMode = "browse", albums = [], onAlbumClick }: P
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
 
   if (viewMode === "list") {
+    const isEmpty = albums.length === 0 && photos.length === 0;
     return (
       <>
         <div className="flex flex-col gap-1">
@@ -68,6 +70,12 @@ const PhotoGrid = ({ photos, viewMode = "browse", albums = [], onAlbumClick }: P
             </button>
           ))}
         </div>
+        {isEmpty && (
+          <EmptyPhotosState
+            title="No photos in this album"
+            description="Upload photos to see them here."
+          />
+        )}
         {previewIndex !== null && (
           <PhotoPreviewModal photos={photos} initialIndex={previewIndex} open onClose={() => setPreviewIndex(null)} />
         )}
@@ -76,6 +84,7 @@ const PhotoGrid = ({ photos, viewMode = "browse", albums = [], onAlbumClick }: P
   }
 
   if (viewMode === "grid") {
+    const isEmpty = albums.length === 0 && photos.length === 0;
     return (
       <>
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
@@ -95,6 +104,12 @@ const PhotoGrid = ({ photos, viewMode = "browse", albums = [], onAlbumClick }: P
             <PhotoCard key={photo.id} photo={photo} onClick={() => setPreviewIndex(i)} />
           ))}
         </div>
+        {isEmpty && (
+          <EmptyPhotosState
+            title="No photos yet"
+            description="Upload photos to get started."
+          />
+        )}
         {previewIndex !== null && (
           <PhotoPreviewModal photos={photos} initialIndex={previewIndex} open onClose={() => setPreviewIndex(null)} />
         )}
@@ -109,6 +124,12 @@ const PhotoGrid = ({ photos, viewMode = "browse", albums = [], onAlbumClick }: P
           <PhotoCard key={photo.id} photo={photo} onClick={() => setPreviewIndex(i)} />
         ))}
       </div>
+      {photos.length === 0 && (
+        <EmptyPhotosState
+          title="No photos yet"
+          description="Upload photos to get started."
+        />
+      )}
       {previewIndex !== null && (
         <PhotoPreviewModal photos={photos} initialIndex={previewIndex} open onClose={() => setPreviewIndex(null)} />
       )}

@@ -16,10 +16,14 @@ export function mapRowToPhoto(row: Record<string, unknown>) {
     id: toStringValue(row.id),
     projectId: toStringValue(row.project_id),
     url,
+    file_url: toStringValue(row.file_url),
     fileName: toStringValue(row.file_name),
     tag: toStringValue(row.tag),
     selected: Boolean(row.selected),
     uploadedAt: toStringValue(row.created_at),
     status: toStringValue(row.status) || "original",
+    photoStatus: toStringValue(row.photo_status) || "original",
+    colorLabel: toStringValue(row.color_label) || "none",
+    albumId: toStringValue(row.album_id) || undefined,
   };
 }

@@ -9,7 +9,7 @@ export interface Project {
   name: string;
   type: ProjectType;
   date: string;
-  coverUrl: string;
+  cover_url: string;
   photoCount: number;
   status: ProjectStatus;
   clientName: string;
@@ -26,6 +26,7 @@ export interface Album {
 export interface Photo {
   id: string;
   url: string;
+  file_url: string;
   fileName: string;
   tag: string;
   selected: boolean;
@@ -90,7 +91,7 @@ export const mockProjects: Project[] = [
     name: "Summer Brand Campaign",
     type: "Campaign",
     date: "2026-03-15",
-    coverUrl: "https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=600&h=400&fit=crop",
+    cover_url: "https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=600&h=400&fit=crop",
     photoCount: 248,
     status: "Reviewing",
     clientName: "Acme Co.",
@@ -101,7 +102,7 @@ export const mockProjects: Project[] = [
     name: "Chen & Wang Wedding",
     type: "Wedding",
     date: "2026-02-20",
-    coverUrl: "https://images.unsplash.com/photo-1519741497674-611481863552?w=600&h=400&fit=crop",
+    cover_url: "https://images.unsplash.com/photo-1519741497674-611481863552?w=600&h=400&fit=crop",
     photoCount: 1024,
     status: "Delivered",
     clientName: "Chen Family",
@@ -112,7 +113,7 @@ export const mockProjects: Project[] = [
     name: "Tech Conference 2026",
     type: "Event",
     date: "2026-03-01",
-    coverUrl: "https://images.unsplash.com/photo-1540575467063-178a50c2df87?w=600&h=400&fit=crop",
+    cover_url: "https://images.unsplash.com/photo-1540575467063-178a50c2df87?w=600&h=400&fit=crop",
     photoCount: 512,
     status: "Reviewing",
     clientName: "TechCorp",
@@ -123,7 +124,7 @@ export const mockProjects: Project[] = [
     name: "Autumn Lookbook",
     type: "Campaign",
     date: "2026-01-10",
-    coverUrl: "https://images.unsplash.com/photo-1469474968028-56623f02e42e?w=600&h=400&fit=crop",
+    cover_url: "https://images.unsplash.com/photo-1469474968028-56623f02e42e?w=600&h=400&fit=crop",
     photoCount: 86,
     status: "Draft",
     clientName: "Vogue Studio",
@@ -134,7 +135,7 @@ export const mockProjects: Project[] = [
     name: "Product Flat Lays",
     type: "Campaign",
     date: "2026-03-28",
-    coverUrl: "https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=600&h=400&fit=crop",
+    cover_url: "https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=600&h=400&fit=crop",
     photoCount: 34,
     status: "Draft",
     clientName: "StartupXYZ",
@@ -145,7 +146,7 @@ export const mockProjects: Project[] = [
     name: "Corporate Gala Night",
     type: "Event",
     date: "2026-02-14",
-    coverUrl: "https://images.unsplash.com/photo-1492684223066-81342ee5ff30?w=600&h=400&fit=crop",
+    cover_url: "https://images.unsplash.com/photo-1492684223066-81342ee5ff30?w=600&h=400&fit=crop",
     photoCount: 320,
     status: "Delivered",
     clientName: "Global Finance Inc.",
@@ -154,18 +155,18 @@ export const mockProjects: Project[] = [
 ];
 
 export const projectPhotos: Photo[] = [
-  { id: "1", url: "https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=400&h=300&fit=crop", fileName: "IMG_1001.jpg", tag: "Landscape", selected: true, photoStatus: "edited", colorLabel: "green", albumId: "ceremony", uploadedAt: "2026-03-15" },
-  { id: "2", url: "https://images.unsplash.com/photo-1469474968028-56623f02e42e?w=400&h=300&fit=crop", fileName: "IMG_1002.jpg", tag: "Landscape", selected: true, photoStatus: "edited", colorLabel: "green", albumId: "ceremony", uploadedAt: "2026-03-15" },
-  { id: "3", url: "https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=400&h=300&fit=crop", fileName: "IMG_1003.jpg", tag: "Detail", selected: false, photoStatus: "original", colorLabel: "red", albumId: "details", uploadedAt: "2026-03-15" },
-  { id: "4", url: "https://images.unsplash.com/photo-1519741497674-611481863552?w=400&h=300&fit=crop", fileName: "IMG_1004.jpg", tag: "Portrait", selected: true, photoStatus: "edited", colorLabel: "blue", albumId: "portraits", uploadedAt: "2026-03-15" },
-  { id: "5", url: "https://images.unsplash.com/photo-1540575467063-178a50c2df87?w=400&h=300&fit=crop", fileName: "IMG_1005.jpg", tag: "Event", selected: false, photoStatus: "original", colorLabel: "none", albumId: "ceremony-prep", uploadedAt: "2026-03-14" },
-  { id: "6", url: "https://images.unsplash.com/photo-1492684223066-81342ee5ff30?w=400&h=300&fit=crop", fileName: "IMG_1006.jpg", tag: "Event", selected: false, photoStatus: "original", colorLabel: "yellow", albumId: "ceremony-prep", uploadedAt: "2026-03-14" },
-  { id: "7", url: "https://images.unsplash.com/photo-1501785888041-af3ef285b470?w=400&h=300&fit=crop", fileName: "IMG_1007.jpg", tag: "Landscape", selected: false, photoStatus: "edited", colorLabel: "none", albumId: "portraits", uploadedAt: "2026-03-14" },
-  { id: "8", url: "https://images.unsplash.com/photo-1470071459604-3b5ec3a7fe05?w=400&h=300&fit=crop", fileName: "IMG_1008.jpg", tag: "Landscape", selected: false, photoStatus: "original", colorLabel: "purple", albumId: "portraits", uploadedAt: "2026-03-14" },
-  { id: "9", url: "https://images.unsplash.com/photo-1447752875215-b2761acb3c5d?w=400&h=300&fit=crop", fileName: "IMG_1009.jpg", tag: "Portrait", selected: false, photoStatus: "original", colorLabel: "none", albumId: "details", uploadedAt: "2026-03-13" },
-  { id: "10", url: "https://images.unsplash.com/photo-1433086966358-54859d0ed716?w=400&h=300&fit=crop", fileName: "IMG_1010.jpg", tag: "Detail", selected: false, photoStatus: "edited", colorLabel: "green", albumId: "details", uploadedAt: "2026-03-13" },
-  { id: "11", url: "https://images.unsplash.com/photo-1482938289607-e9573fc25ebb?w=400&h=300&fit=crop", fileName: "IMG_1011.jpg", tag: "Landscape", selected: false, photoStatus: "original", colorLabel: "none", albumId: "bts", uploadedAt: "2026-03-13" },
-  { id: "12", url: "https://images.unsplash.com/photo-1465146344425-f00d5f5c8f07?w=400&h=300&fit=crop", fileName: "IMG_1012.jpg", tag: "Detail", selected: false, photoStatus: "original", colorLabel: "none", albumId: "bts", uploadedAt: "2026-03-13" },
+  { id: "1", url: "https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=400&h=300&fit=crop", file_url: "https://images.unsplash.com/photo-1506744038136-46273834b3fb", fileName: "IMG_1001.jpg", tag: "Landscape", selected: true, photoStatus: "edited", colorLabel: "green", albumId: "ceremony", uploadedAt: "2026-03-15" },
+  { id: "2", url: "https://images.unsplash.com/photo-1469474968028-56623f02e42e?w=400&h=300&fit=crop", file_url: "https://images.unsplash.com/photo-1469474968028-56623f02e42e", fileName: "IMG_1002.jpg", tag: "Landscape", selected: true, photoStatus: "edited", colorLabel: "green", albumId: "ceremony", uploadedAt: "2026-03-15" },
+  { id: "3", url: "https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=400&h=300&fit=crop", file_url: "https://images.unsplash.com/photo-1505740420928-5e560c06d30e", fileName: "IMG_1003.jpg", tag: "Detail", selected: false, photoStatus: "original", colorLabel: "red", albumId: "details", uploadedAt: "2026-03-15" },
+  { id: "4", url: "https://images.unsplash.com/photo-1519741497674-611481863552?w=400&h=300&fit=crop", file_url: "https://images.unsplash.com/photo-1519741497674-611481863552", fileName: "IMG_1004.jpg", tag: "Portrait", selected: true, photoStatus: "edited", colorLabel: "blue", albumId: "portraits", uploadedAt: "2026-03-15" },
+  { id: "5", url: "https://images.unsplash.com/photo-1540575467063-178a50c2df87?w=400&h=300&fit=crop", file_url: "https://images.unsplash.com/photo-1540575467063-178a50c2df87", fileName: "IMG_1005.jpg", tag: "Event", selected: false, photoStatus: "original", colorLabel: "none", albumId: "ceremony-prep", uploadedAt: "2026-03-14" },
+  { id: "6", url: "https://images.unsplash.com/photo-1492684223066-81342ee5ff30?w=400&h=300&fit=crop", file_url: "https://images.unsplash.com/photo-1492684223066-81342ee5ff30", fileName: "IMG_1006.jpg", tag: "Event", selected: false, photoStatus: "original", colorLabel: "yellow", albumId: "ceremony-prep", uploadedAt: "2026-03-14" },
+  { id: "7", url: "https://images.unsplash.com/photo-1501785888041-af3ef285b470?w=400&h=300&fit=crop", file_url: "https://images.unsplash.com/photo-1501785888041-af3ef285b470", fileName: "IMG_1007.jpg", tag: "Landscape", selected: false, photoStatus: "edited", colorLabel: "none", albumId: "portraits", uploadedAt: "2026-03-14" },
+  { id: "8", url: "https://images.unsplash.com/photo-1470071459604-3b5ec3a7fe05?w=400&h=300&fit=crop", file_url: "https://images.unsplash.com/photo-1470071459604-3b5ec3a7fe05", fileName: "IMG_1008.jpg", tag: "Landscape", selected: false, photoStatus: "original", colorLabel: "purple", albumId: "portraits", uploadedAt: "2026-03-14" },
+  { id: "9", url: "https://images.unsplash.com/photo-1447752875215-b2761acb3c5d?w=400&h=300&fit=crop", file_url: "https://images.unsplash.com/photo-1447752875215-b2761acb3c5d", fileName: "IMG_1009.jpg", tag: "Portrait", selected: false, photoStatus: "original", colorLabel: "none", albumId: "details", uploadedAt: "2026-03-13" },
+  { id: "10", url: "https://images.unsplash.com/photo-1433086966358-54859d0ed716?w=400&h=300&fit=crop", file_url: "https://images.unsplash.com/photo-1433086966358-54859d0ed716", fileName: "IMG_1010.jpg", tag: "Detail", selected: false, photoStatus: "edited", colorLabel: "green", albumId: "details", uploadedAt: "2026-03-13" },
+  { id: "11", url: "https://images.unsplash.com/photo-1482938289607-e9573fc25ebb?w=400&h=300&fit=crop", file_url: "https://images.unsplash.com/photo-1482938289607-e9573fc25ebb", fileName: "IMG_1011.jpg", tag: "Landscape", selected: false, photoStatus: "original", colorLabel: "none", albumId: "bts", uploadedAt: "2026-03-13" },
+  { id: "12", url: "https://images.unsplash.com/photo-1465146344425-f00d5f5c8f07?w=400&h=300&fit=crop", file_url: "https://images.unsplash.com/photo-1465146344425-f00d5f5c8f07", fileName: "IMG_1012.jpg", tag: "Detail", selected: false, photoStatus: "original", colorLabel: "none", albumId: "bts", uploadedAt: "2026-03-13" },
 ];
 
 export const mockUploadFiles: UploadFile[] = [

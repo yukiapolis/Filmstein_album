@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { X, ChevronLeft, ChevronRight, Download, Heart } from "lucide-react";
 import type { Photo } from "@/data/mockData";
 import { Button } from "@/components/ui/button";
@@ -15,12 +15,49 @@ interface PhotoPreviewModalProps {
 const PhotoPreviewModal = ({ photos, initialIndex, open, onClose }: PhotoPreviewModalProps) => {
   const [index, setIndex] = useState(initialIndex);
 
+  const prev = useCallback(() => setIndex((i) => (i > 0 ? i - 1 : photos.length - 1)), [photos.length]);
+  const next = useCallback(() => setIndex((i) => (i < photos.length - 1 ? i + 1 : 0)), [photos.length]);
+
+  /** Keyboard navigation: Escape closes, ArrowLeft/ArrowRight navigate. */
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+      if (e.key === "ArrowLeft") prev();
+      if (e.key === "ArrowRight") next();
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [open, onClose, prev, next]);
+
   if (!open || photos.length === 0) return null;
 
   const photo = photos[index];
 
-  const prev = () => setIndex((i) => (i > 0 ? i - 1 : photos.length - 1));
-  const next = () => setIndex((i) => (i < photos.length - 1 ? i + 1 : 0));
+  const handleDownload = async () => {
+    const src = photo.file_url || photo.url;
+    const filename =
+      (photo as Record<string, unknown>).original_name as string ||
+      (photo as Record<string, unknown>).name as string ||
+      photo.fileName ||
+      "photo.jpg";
+
+    try {
+      const res = await fetch(src);
+      if (!res.ok) throw new Error("Network response was not ok");
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = blobUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(blobUrl);
+    } catch {
+      window.open(src, "_blank", "noopener,noreferrer");
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90" onClick={onClose}>
@@ -28,7 +65,7 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose }: PhotoPreview
         <Button size="icon" variant="ghost" className="text-white hover:bg-white/10" onClick={(e) => { e.stopPropagation(); }}>
           <Heart className="h-5 w-5" />
         </Button>
-        <Button size="icon" variant="ghost" className="text-white hover:bg-white/10" onClick={(e) => { e.stopPropagation(); }}>
+        <Button size="icon" variant="ghost" className="text-white hover:bg-white/10" onClick={(e) => { e.stopPropagation(); handleDownload(); }}>
           <Download className="h-5 w-5" />
         </Button>
         <Button size="icon" variant="ghost" className="text-white hover:bg-white/10" onClick={onClose}>

@@ -51,3 +51,41 @@ export async function GET(_req: Request, context: RouteContext) {
     return Response.json({ success: false, error: 'Server error' }, { status: 500 })
   }
 }
+
+export async function PATCH(req: Request, context: RouteContext) {
+  try {
+    const { id } = await context.params
+    const body = await req.json()
+
+    const updates: Record<string, unknown> = {}
+    if (typeof body.name === 'string' && body.name.trim()) updates.name = body.name.trim()
+    if (typeof body.client_name === 'string') updates.client_name = body.client_name.trim()
+    if (typeof body.type === 'string') updates.type = body.type
+    if (typeof body.status === 'string') updates.status = body.status
+    if (typeof body.description === 'string') updates.description = body.description.trim()
+    if (typeof body.cover_url === 'string') updates.cover_url = body.cover_url.trim()
+
+    if (Object.keys(updates).length === 0) {
+      return Response.json({ success: false, error: 'No fields to update' }, { status: 400 })
+    }
+
+    const { data, error } = await supabase
+      .from('projects')
+      .update(updates)
+      .eq('id', id)
+      .select()
+      .maybeSingle()
+
+    if (error) {
+      return Response.json({ success: false, error: error.message }, { status: 500 })
+    }
+
+    if (!data) {
+      return Response.json({ success: false, error: 'Not found' }, { status: 404 })
+    }
+
+    return Response.json({ success: true, data })
+  } catch {
+    return Response.json({ success: false, error: 'Server error' }, { status: 500 })
+  }
+}
