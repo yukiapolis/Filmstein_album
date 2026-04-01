@@ -37,8 +37,8 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose }: PhotoPreview
   const handleDownload = async () => {
     const src = photo.file_url || photo.url;
     const filename =
-      (photo as Record<string, unknown>).original_name as string ||
-      (photo as Record<string, unknown>).name as string ||
+      (photo as unknown as Record<string, unknown>).original_name as string ||
+      (photo as unknown as Record<string, unknown>).name as string ||
       photo.fileName ||
       "photo.jpg";
 

@@ -24,7 +24,7 @@ export default function Home() {
     console.log("[DEBUG] body.data first item keys:", Array.isArray(body.data) ? Object.keys(body.data[0] ?? {}) : "not array");
     if (!body.success || !Array.isArray(body.data)) return;
     const mapped = body.data.map((row) => mapRowToProject(row as Record<string, unknown>));
-    console.log("[DEBUG] mapped projects[0].coverUrl:", mapped[0]?.coverUrl);
+    console.log("[DEBUG] mapped projects[0].cover_url:", mapped[0]?.cover_url);
     setProjects(mapped);
   }, []);
 
@@ -55,10 +55,10 @@ export default function Home() {
         {projects[0] && (
           <div className="rounded border border-red-500 p-4 space-y-2">
             <p className="text-xs text-red-500 font-mono">
-              [DEBUG] projects[0].coverUrl = {projects[0].coverUrl}
+              [DEBUG] projects[0].cover_url = {projects[0].cover_url}
             </p>
             <img
-              src={projects[0].coverUrl}
+              src={projects[0].cover_url}
               alt="raw debug cover"
               className="h-48 w-full object-cover rounded"
             />
