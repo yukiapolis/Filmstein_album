@@ -78,6 +78,7 @@ const ClientGallery = ({ photos: externalPhotos }: { photos?: Photo[] }) => {
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
   const [activeTag, setActiveTag] = useState<string>("all");
   const [downloading, setDownloading] = useState(false);
+  const [downloadingAll, setDownloadingAll] = useState(false);
   const [folders, setFolders] = useState<{ id: string; name: string }[]>([]);
   const [activeFolder, setActiveFolder] = useState<string>("all");
 
@@ -185,22 +186,22 @@ const ClientGallery = ({ photos: externalPhotos }: { photos?: Photo[] }) => {
                 onClick={downloadSelected}
                 disabled={downloading}
               >
-                {downloading ? (
-                  <>
-                    <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                    Downloading...
-                  </>
-                ) : (
-                  <>
-                    <Download className="mr-1.5 h-3.5 w-3.5" />
-                    Download Selected
-                  </>
-                )}
+              {downloading ? (
+                <>
+                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                  Downloading...
+                </>
+              ) : (
+                <>
+                  <Download className="mr-1.5 h-3.5 w-3.5" />
+                  Download Selected
+                </>
+              )}
               </Button>
             )}
             <Button size="sm" variant="outline" onClick={() => {
               if (filtered.length === 0) return;
-              setDownloading(true);
+              setDownloadingAll(true);
               const photoIds = filtered.map((p) => p.id);
               fetch("/api/photos/download-zip", {
                 method: "POST",
@@ -219,10 +220,19 @@ const ClientGallery = ({ photos: externalPhotos }: { photos?: Photo[] }) => {
                   window.URL.revokeObjectURL(url);
                 })
                 .catch(console.error)
-                .finally(() => setDownloading(false));
-            }}>
-              <Download className="mr-1.5 h-3.5 w-3.5" />
-              Download All
+                .finally(() => setDownloadingAll(false));
+            }} disabled={downloadingAll}>
+              {downloadingAll ? (
+                <>
+                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                  Downloading...
+                </>
+              ) : (
+                <>
+                  <Download className="mr-1.5 h-3.5 w-3.5" />
+                  Download All
+                </>
+              )}
             </Button>
           </div>
         </div>
