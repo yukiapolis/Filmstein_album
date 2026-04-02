@@ -96,6 +96,9 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
   const [selectedPhotoIds, setSelectedPhotoIds] = useState<Set<string>>(new Set());
   const [moveTargetFolderId, setMoveTargetFolderId] = useState<string>("");
   const [moving, setMoving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [publishing, setPublishing] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
 
   const refreshFolders = useCallback(async () => {
     try {
@@ -313,6 +316,15 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
     setMoveTargetFolderId("");
   }, []);
 
+  useEffect(() => {
+    setSelectedPhotoIds((prev) => {
+      if (prev.size === 0) return prev;
+      const validIds = new Set(photos.map((photo) => photo.id));
+      const next = new Set(Array.from(prev).filter((id) => validIds.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [photos]);
+
   const allVisibleSelected =
     displayPhotos.length > 0 && displayPhotos.every((p) => selectedPhotoIds.has(p.id));
   const someVisibleSelected = displayPhotos.some((p) => selectedPhotoIds.has(p.id));
@@ -358,6 +370,91 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
       console.error("Move error:", err);
     } finally {
       setMoving(false);
+    }
+  };
+
+  const handleDeleteCurrentVersion = async (photo: Photo) => {
+    const res = await fetch(`/api/photos/${photo.id}?mode=all-versions`, {
+      method: 'DELETE',
+    });
+    const body = await res.json();
+    if (body.success) {
+      await refreshPhotos();
+    } else {
+      console.error('Delete failed:', body.error);
+    }
+  };
+
+  const handleBatchDeleteCurrentVersions = async () => {
+    if (selectedPhotoIds.size === 0) return;
+
+    const selectedPhotos = displayPhotos.filter((p) => selectedPhotoIds.has(p.id));
+    const photoIds = selectedPhotos.map((photo) => photo.id);
+
+    if (photoIds.length === 0) return;
+
+    setDeleting(true);
+    try {
+      const res = await fetch('/api/photos', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          photoIds,
+          mode: 'all-versions',
+        }),
+      });
+      const body = await res.json();
+      if (body.success) {
+        await refreshPhotos();
+        clearSelection();
+      } else {
+        console.error('Batch delete failed:', body.error);
+      }
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const handleTogglePublish = async (photo: Photo, isPublished: boolean) => {
+    setPublishing(true);
+    try {
+      const res = await fetch(`/api/photos/${photo.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isPublished }),
+      });
+      const body = await res.json();
+      if (body.success) {
+        await refreshPhotos();
+      } else {
+        console.error('Publish toggle failed:', body.error);
+      }
+    } finally {
+      setPublishing(false);
+    }
+  };
+
+  const handleBatchPublish = async (isPublished: boolean) => {
+    if (selectedPhotoIds.size === 0) return;
+    setPublishing(true);
+    try {
+      const res = await fetch('/api/photos', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          photoIds: Array.from(selectedPhotoIds),
+          isPublished,
+        }),
+      });
+      const body = await res.json();
+      if (body.success) {
+        await refreshPhotos();
+        clearSelection();
+      } else {
+        console.error('Batch publish failed:', body.error);
+      }
+    } finally {
+      setPublishing(false);
     }
   };
 
@@ -698,9 +795,18 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
                     ))}
                   </select>
                 </div>
-                <Button size="sm" onClick={handleBatchMove} disabled={moving}>
+                <Button size="sm" onClick={handleBatchMove} disabled={moving || deleting || publishing}>
                   <Move className="mr-1 h-4 w-4" />
                   {moving ? "Moving…" : "Move"}
+                </Button>
+                <Button size="sm" variant="outline" type="button" onClick={() => void handleBatchPublish(true)} disabled={deleting || moving || publishing}>
+                  {publishing ? "Publishing…" : "Publish"}
+                </Button>
+                <Button size="sm" variant="outline" type="button" onClick={() => void handleBatchPublish(false)} disabled={deleting || moving || publishing}>
+                  {publishing ? "Publishing…" : "Unpublish"}
+                </Button>
+                <Button size="sm" variant="destructive" type="button" onClick={() => setDeleteConfirmOpen(true)} disabled={deleting || moving || publishing}>
+                  {deleting ? "Deleting…" : "Delete"}
                 </Button>
                 <Button size="sm" variant="ghost" type="button" onClick={clearSelection}>
                   Clear
@@ -756,6 +862,8 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
                 onToggleSelect={togglePhotoSelection}
                 selectedIds={Array.from(selectedPhotoIds)}
                 cardVariant="gallery"
+                onDeletePhoto={handleDeleteCurrentVersion}
+                onTogglePublish={handleTogglePublish}
               />
             ) : (
               <p className="py-12 text-center text-sm text-muted-foreground">
@@ -790,6 +898,33 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
           project={project}
           onSaved={(updated) => setProject(updated)}
         />
+      )}
+
+      {deleteConfirmOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-md rounded-xl border border-border bg-card p-5 shadow-xl">
+            <h3 className="text-base font-semibold text-foreground">确认删除</h3>
+            <p className="mt-2 text-sm text-muted-foreground">
+              这会删除所选图片的全部版本，并删除对应逻辑照片。此操作不可恢复。
+            </p>
+            <div className="mt-4 flex justify-end gap-2">
+              <Button type="button" variant="outline" onClick={() => setDeleteConfirmOpen(false)} disabled={deleting}>
+                取消
+              </Button>
+              <Button
+                type="button"
+                variant="destructive"
+                onClick={async () => {
+                  await handleBatchDeleteCurrentVersions();
+                  setDeleteConfirmOpen(false);
+                }}
+                disabled={deleting}
+              >
+                {deleting ? '删除中…' : '确认删除'}
+              </Button>
+            </div>
+          </div>
+        </div>
       )}
 
       {project && (

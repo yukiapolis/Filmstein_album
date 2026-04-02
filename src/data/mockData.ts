@@ -38,6 +38,7 @@ export interface Photo {
   folderId?: string;
   originalFileId?: string;
   retouchedFileId?: string;
+  isPublished?: boolean;
 }
 
 export interface UploadFile {

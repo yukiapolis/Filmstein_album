@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
 import { Check, Download } from "lucide-react";
 import type { Photo } from "@/data/mockData";
 import { colorLabelMap } from "@/data/mockData";
@@ -8,16 +9,9 @@ import { cn } from "@/lib/utils";
 interface PhotoCardProps {
   photo: Photo;
   onClick?: () => void;
-  /** Whether this photo is selected */
   selected?: boolean;
-  /** Callback when user toggles selection via the checkbox */
   onSelect?: (selected: boolean) => void;
-  /**
-   * When true, the checkbox stays visible once any selection is made.
-   * When false (default), the checkbox only appears on hover.
-   */
   selectionMode?: boolean;
-  /** gallery = metadata below image (DAM-style); overlay = hover-only caption on image */
   variant?: "gallery" | "overlay";
 }
 
@@ -32,17 +26,33 @@ const PhotoCard = ({
   const colorInfo =
     photo.colorLabel !== "none" ? colorLabelMap[photo.colorLabel] : null;
   const isEdited = photo.photoStatus === "edited";
+  const [showDownloadMenu, setShowDownloadMenu] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!showDownloadMenu) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setShowDownloadMenu(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [showDownloadMenu]);
 
   const handleCheckboxClick = (e: React.MouseEvent) => {
     e.stopPropagation();
     onSelect?.(!selected);
   };
 
-  const handleDownloadClick = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    const href = photo.file_url || photo.url;
-    if (href) window.open(href, "_blank", "noopener,noreferrer");
+  const openDownload = (href: string | undefined) => {
+    if (!href) return;
+    window.open(href, "_blank", "noopener,noreferrer");
+    setShowDownloadMenu(false);
   };
+
+  const imageSrc = (photo as Photo & { thumbUrl?: string; displayUrl?: string }).thumbUrl || photo.url;
+  const uploadedAt = photo.uploadedAt ? new Date(photo.uploadedAt).toLocaleString() : "Unknown time";
 
   if (variant === "overlay") {
     return (
@@ -52,16 +62,14 @@ const PhotoCard = ({
       >
         <div className="overflow-hidden">
           <img
-            src={photo.url}
+            src={imageSrc}
             alt={photo.fileName}
             className="w-full object-cover transition-transform duration-300 group-hover:scale-105"
             loading="lazy"
           />
         </div>
 
-        {selected && (
-          <div className="absolute inset-0 z-10 bg-black/25" />
-        )}
+        {selected && <div className="absolute inset-0 z-10 bg-black/25" />}
 
         {colorInfo && (
           <div
@@ -82,7 +90,7 @@ const PhotoCard = ({
             type="button"
             onClick={handleCheckboxClick}
             className={cn(
-              "absolute bottom-2 right-2 z-20 flex h-9 w-9 items-center justify-center rounded-md border-2 transition-all",
+              "absolute bottom-2 right-2 z-20 flex h-9 w-9 items-center justify-center rounded-full border-2 transition-all",
               selected
                 ? "border-primary bg-primary opacity-100"
                 : selectionMode
@@ -106,40 +114,26 @@ const PhotoCard = ({
     );
   }
 
-  // —— gallery / DAM layout ——
   return (
     <div
       className={cn(
         "overflow-hidden rounded-xl border border-border bg-card shadow-sm transition-all",
-        selected
-          ? "ring-2 ring-sky-500/70 shadow-md"
-          : "hover:shadow-md",
+        selected ? "ring-2 ring-sky-500/70 shadow-md" : "hover:shadow-md",
       )}
     >
-      <div
-        className={cn(
-          "group relative aspect-[4/3] cursor-pointer overflow-hidden bg-muted",
-        )}
-        onClick={onClick}
-      >
+      <div className="group relative aspect-[4/3] cursor-pointer overflow-hidden bg-muted" onClick={onClick}>
         <img
-          src={photo.url}
+          src={imageSrc}
           alt={photo.fileName}
           className={cn(
             "h-full w-full object-cover transition-all duration-300",
-            selected
-              ? "scale-[0.97] brightness-50"
-              : "group-hover:scale-[1.02]",
+            selected ? "scale-[0.97] brightness-50" : "group-hover:scale-[1.02]",
           )}
           loading="lazy"
         />
 
-        {/* Selected dimming overlay */}
-        {selected && (
-          <div className="absolute inset-0 z-10 bg-black/20 pointer-events-none" />
-        )}
+        {selected && <div className="absolute inset-0 z-10 bg-black/20 pointer-events-none" />}
 
-        {/* Status badge — top left */}
         <div className="absolute left-2 top-2 z-20">
           <span
             className={cn(
@@ -149,31 +143,22 @@ const PhotoCard = ({
                 : "border border-border/80 bg-white/95 text-muted-foreground shadow-sm",
             )}
           >
-            {isEdited ? "edited" : "original"}
+            {isEdited ? "retouched" : "original"}
           </span>
         </div>
 
-        {/* Selected checkmark — top right */}
-        {selected && (
-          <div className="absolute right-2 top-2 z-20 flex h-6 w-6 items-center justify-center rounded-full bg-sky-600 text-white shadow-sm">
-            <Check className="h-3.5 w-3.5" />
-          </div>
-        )}
-
-        {/* Color label — bottom left */}
         {colorInfo && (
           <div
             className={`absolute bottom-2 left-2 z-20 h-3 w-3 rounded-full ${colorInfo.bg} ring-2 ring-white/90`}
           />
         )}
 
-        {/* Selection checkbox — bottom right */}
         {onSelect !== undefined && (
           <button
             type="button"
             onClick={handleCheckboxClick}
             className={cn(
-              "absolute bottom-2 right-2 z-20 flex h-8 w-8 items-center justify-center rounded border-2 transition-all",
+              "absolute bottom-2 right-2 z-20 flex h-8 w-8 items-center justify-center rounded-full border-2 transition-all",
               selected
                 ? "border-sky-600 bg-sky-600 text-white"
                 : selectionMode
@@ -197,24 +182,46 @@ const PhotoCard = ({
           >
             {photo.fileName}
           </p>
-          <p
-            className={cn(
-              "text-xs font-medium",
-              isEdited ? "text-sky-600" : "text-muted-foreground",
-            )}
-          >
-            {isEdited ? "Edited" : "Original"}
-          </p>
+          <p className="text-xs text-muted-foreground">{uploadedAt}</p>
         </div>
-        <button
-          type="button"
-          onClick={handleDownloadClick}
-          className="shrink-0 rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-          title="Download"
-          aria-label="Download"
-        >
-          <Download className="h-4 w-4" />
-        </button>
+        <div className="relative shrink-0" ref={menuRef}>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowDownloadMenu((v) => !v);
+            }}
+            className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            title="Download"
+            aria-label="Download"
+          >
+            <Download className="h-4 w-4" />
+          </button>
+          {showDownloadMenu && (
+            <div className="absolute right-0 top-8 z-30 min-w-40 rounded-lg border border-border bg-card p-1 shadow-lg">
+              <button
+                type="button"
+                className="block w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  openDownload((photo as Photo & { displayUrl?: string; downloadUrl?: string }).displayUrl || photo.file_url || photo.url);
+                }}
+              >
+                下载当前版本
+              </button>
+              <button
+                type="button"
+                className="block w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  openDownload((photo as Photo & { originalUrl?: string }).originalUrl || photo.url);
+                }}
+              >
+                下载原图
+              </button>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

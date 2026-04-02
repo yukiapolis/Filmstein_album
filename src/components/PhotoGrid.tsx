@@ -18,6 +18,8 @@ interface PhotoGridProps {
   selectedIds?: string[];
   /** Card layout: gallery shows filename row below image */
   cardVariant?: "gallery" | "overlay";
+  onDeletePhoto?: (photo: Photo) => Promise<void> | void;
+  onTogglePublish?: (photo: Photo, isPublished: boolean) => Promise<void> | void;
 }
 
 const PhotoGrid = ({
@@ -28,6 +30,8 @@ const PhotoGrid = ({
   onToggleSelect,
   selectedIds = [],
   cardVariant = "gallery",
+  onDeletePhoto,
+  onTogglePublish,
 }: PhotoGridProps) => {
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
 
@@ -43,7 +47,9 @@ const PhotoGrid = ({
     return (
       <>
         <div className="flex flex-col gap-1">
-          {photos.map((photo, i) => (
+          {photos.map((photo, i) => {
+            const listThumbSrc = (photo as Photo & { thumbUrl?: string }).thumbUrl || photo.url;
+            return (
             <div
               key={photo.id}
               className={`flex items-center gap-3 rounded-lg border px-3 py-2 text-left transition-colors ${
@@ -75,7 +81,7 @@ const PhotoGrid = ({
                 </div>
               )}
               <img
-                src={photo.url}
+                src={listThumbSrc}
                 alt={photo.fileName}
                 className="h-10 w-10 shrink-0 rounded object-cover"
               />
@@ -102,7 +108,7 @@ const PhotoGrid = ({
                 />
               )}
             </div>
-          ))}
+          )})}
         </div>
         {isEmpty && (
           <EmptyPhotosState
@@ -116,6 +122,8 @@ const PhotoGrid = ({
             initialIndex={previewIndex}
             open
             onClose={() => setPreviewIndex(null)}
+            onDeleteCurrent={onDeletePhoto}
+            onTogglePublish={onTogglePublish}
           />
         )}
       </>
@@ -150,6 +158,8 @@ const PhotoGrid = ({
           initialIndex={previewIndex}
           open
           onClose={() => setPreviewIndex(null)}
+          onDeleteCurrent={onDeletePhoto}
+          onTogglePublish={onTogglePublish}
         />
       )}
     </>

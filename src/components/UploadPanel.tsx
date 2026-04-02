@@ -60,6 +60,7 @@ const UploadPanel = ({
   onFolderCreated,
 }: UploadPanelProps) => {
   const [files, setFiles] = useState<UploadFile[]>([]);
+  const [displayPreset, setDisplayPreset] = useState<"original" | "6000" | "4000">("4000");
   const [isDragging, setIsDragging] = useState(false);
   const [selectedFolderId, setSelectedFolderId] = useState<string>("");
   const [showNewFolder, setShowNewFolder] = useState(false);
@@ -72,6 +73,7 @@ const UploadPanel = ({
       setSelectedFolderId("");
       setShowNewFolder(false);
       setNewFolderName("");
+      setDisplayPreset("4000");
     }
   }, [open]);
 
@@ -144,6 +146,7 @@ const UploadPanel = ({
     const formData = new FormData();
     formData.append("file", file._raw);
     formData.append("projectId", projectId);
+    formData.append("displayPreset", displayPreset);
     if (selectedFolderId) {
       formData.append("folderId", selectedFolderId);
       // Also send folder name for backward compatibility
@@ -252,6 +255,24 @@ const UploadPanel = ({
                 New Folder
               </Button>
             )}
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+              Display version
+            </label>
+            <select
+              value={displayPreset}
+              onChange={(e) => setDisplayPreset(e.target.value as "original" | "6000" | "4000")}
+              className="h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm"
+            >
+              <option value="original">Original</option>
+              <option value="6000">Max edge 6000px</option>
+              <option value="4000">Max edge 4000px</option>
+            </select>
+            <p className="text-xs text-muted-foreground">
+              Display files are prepared locally before upload to reduce bandwidth.
+            </p>
           </div>
 
           {/* Drop zone */}

@@ -57,7 +57,7 @@ const ClientGallery = ({ photos: externalPhotos }: { photos?: Photo[] }) => {
     (async () => {
       try {
         const [projRes, foldersRes] = await Promise.all([
-          fetch(`/api/projects/${id}`),
+          fetch(`/api/projects/${id}?publishedOnly=true`),
           fetch(`/api/projects/${id}/folders`),
         ]);
         const projBody = await projRes.json();
@@ -192,7 +192,7 @@ const ClientGallery = ({ photos: externalPhotos }: { photos?: Photo[] }) => {
   const handleRefresh = async () => {
     if (!id) return;
     try {
-      const res = await fetch(`/api/projects/${id}`);
+      const res = await fetch(`/api/projects/${id}?publishedOnly=true`);
       const body = await res.json();
       if (res.ok && body.success && Array.isArray(body.data?.photos)) {
         setPhotos(body.data.photos as Photo[]);
