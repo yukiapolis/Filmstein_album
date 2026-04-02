@@ -21,23 +21,13 @@ export default function Home() {
     if (typeof json !== "object" || json === null) return;
     const body = json as { success?: boolean; data?: unknown };
     if (!body.success || !Array.isArray(body.data)) return;
-    setProjects(body.data.map((row) => mapRowToProject(row as Record<string, unknown>)));
+    const mapped = body.data.map((row) => mapRowToProject(row as Record<string, unknown>));
+    setProjects(mapped);
   }, []);
 
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const res = await fetch("/api/projects");
-      const json: unknown = await res.json();
-      if (cancelled || typeof json !== "object" || json === null) return;
-      const body = json as { success?: boolean; data?: unknown };
-      if (!body.success || !Array.isArray(body.data)) return;
-      setProjects(body.data.map((row) => mapRowToProject(row as Record<string, unknown>)));
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    refreshProjects();
+  }, [refreshProjects]);
 
   return (
     <div className="min-h-screen bg-surface">

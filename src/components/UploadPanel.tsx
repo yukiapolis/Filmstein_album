@@ -1,7 +1,7 @@
 "use client";
 
-import { useRef, useState, useCallback } from "react";
-import { Upload, X, CheckCircle2, AlertCircle, Loader2, Clock } from "lucide-react";
+import { useRef, useState, useCallback, useEffect } from "react";
+import { Upload, X, CheckCircle2, AlertCircle, Loader2, Clock, Folder, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 const formatFileSize = (bytes: number): string => {
@@ -33,19 +33,47 @@ interface UploadFile {
   _raw?: File;
 }
 
+interface FolderItem {
+  id: string;
+  name: string;
+}
+
 interface UploadPanelProps {
   open: boolean;
   onClose: () => void;
   projectId?: string;
+  /** Available folders for the current project */
+  folders?: FolderItem[];
   /** Called once after at least one file finishes (success or fail), with the
    *  total number of files that ended in Completed state. */
   onUploadDone?: (completedCount: number) => void;
+  /** Called when a new folder is created */
+  onFolderCreated?: () => void;
 }
 
-const UploadPanel = ({ open, onClose, projectId, onUploadDone }: UploadPanelProps) => {
+const UploadPanel = ({
+  open,
+  onClose,
+  projectId,
+  folders = [],
+  onUploadDone,
+  onFolderCreated,
+}: UploadPanelProps) => {
   const [files, setFiles] = useState<UploadFile[]>([]);
   const [isDragging, setIsDragging] = useState(false);
+  const [selectedFolderId, setSelectedFolderId] = useState<string>("");
+  const [showNewFolder, setShowNewFolder] = useState(false);
+  const [newFolderName, setNewFolderName] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Sync when panel opens
+  useEffect(() => {
+    if (open) {
+      setSelectedFolderId("");
+      setShowNewFolder(false);
+      setNewFolderName("");
+    }
+  }, [open]);
 
   const addFiles = useCallback((rawFiles: FileList | File[]) => {
     const newFiles: UploadFile[] = Array.from(rawFiles).map((f) => ({
@@ -80,6 +108,33 @@ const UploadPanel = ({ open, onClose, projectId, onUploadDone }: UploadPanelProp
     );
   };
 
+  const handleNewFolder = async () => {
+    const name = newFolderName.trim();
+    if (!name || !projectId) {
+      setShowNewFolder(false);
+      setNewFolderName("");
+      return;
+    }
+
+    try {
+      const res = await fetch(`/api/projects/${projectId}/folders`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      const body = await res.json();
+      if (body.success && body.data) {
+        // Add to local list and select it
+        setSelectedFolderId(body.data.id);
+        onFolderCreated?.();
+      }
+    } catch {
+      // Silently ignore
+    }
+    setNewFolderName("");
+    setShowNewFolder(false);
+  };
+
   /** Upload a single file to POST /api/upload. Returns true on success. */
   const uploadOne = async (file: UploadFile): Promise<boolean> => {
     if (!file._raw || !projectId) return false;
@@ -89,6 +144,14 @@ const UploadPanel = ({ open, onClose, projectId, onUploadDone }: UploadPanelProp
     const formData = new FormData();
     formData.append("file", file._raw);
     formData.append("projectId", projectId);
+    if (selectedFolderId) {
+      formData.append("folderId", selectedFolderId);
+      // Also send folder name for backward compatibility
+      const folder = folders.find((f) => f.id === selectedFolderId);
+      if (folder) {
+        formData.append("folder", folder.name);
+      }
+    }
 
     try {
       const res = await fetch("/api/upload", { method: "POST", body: formData });
@@ -153,6 +216,43 @@ const UploadPanel = ({ open, onClose, projectId, onUploadDone }: UploadPanelProp
             className="hidden"
             onChange={handleFileInput}
           />
+
+          {/* Folder selector */}
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 flex-1">
+              <Folder className="h-4 w-4 text-muted-foreground" />
+              <select
+                value={selectedFolderId}
+                onChange={(e) => setSelectedFolderId(e.target.value)}
+                className="flex-1 h-9 rounded-md border border-input bg-background px-3 py-1 text-sm"
+              >
+                <option value="">No folder</option>
+                {folders.map((f) => (
+                  <option key={f.id} value={f.id}>{f.name}</option>
+                ))}
+              </select>
+            </div>
+            {showNewFolder ? (
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={newFolderName}
+                  onChange={(e) => setNewFolderName(e.target.value)}
+                  placeholder="Folder name"
+                  className="h-9 w-32 rounded-md border border-input bg-background px-3 py-1 text-sm"
+                  onKeyDown={(e) => { if (e.key === "Enter") handleNewFolder(); if (e.key === "Escape") { setShowNewFolder(false); setNewFolderName(""); } }}
+                  autoFocus
+                />
+                <Button size="sm" type="button" onClick={handleNewFolder}>Add</Button>
+                <Button size="sm" variant="ghost" type="button" onClick={() => { setShowNewFolder(false); setNewFolderName(""); }}>Cancel</Button>
+              </div>
+            ) : (
+              <Button size="sm" variant="outline" type="button" onClick={() => setShowNewFolder(true)}>
+                <Plus className="h-4 w-4 mr-1" />
+                New Folder
+              </Button>
+            )}
+          </div>
 
           {/* Drop zone */}
           <div

@@ -5,9 +5,7 @@ type PageProps = {
 };
 
 /** Preview page at /projects/[id]/preview.
- *  Renders the client-facing gallery backed by mock data for now.
- *  When a real API is wired, pass the fetched photos as a prop to <ClientGallery>. */
-export default async function ProjectPreviewPage({ params }: PageProps) {
-  const { id } = await params;
+ *  ClientGallery handles its own reactive data fetching from /api/projects/[id]. */
+export default async function ProjectPreviewPage(_props: PageProps) {
   return <ClientGallery />;
 }

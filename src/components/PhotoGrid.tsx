@@ -1,10 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { FolderOpen, ChevronRight } from "lucide-react";
 import type { Photo, Album } from "@/data/mockData";
 import PhotoCard from "@/components/PhotoCard";
 import PhotoPreviewModal from "@/components/PhotoPreviewModal";
+import EmptyPhotosState from "@/components/EmptyPhotosState";
 
 export type ViewMode = "browse" | "grid" | "list";
 
@@ -13,12 +14,27 @@ interface PhotoGridProps {
   viewMode?: ViewMode;
   albums?: Album[];
   onAlbumClick?: (albumId: string) => void;
+  /** Selection mode */
+  selectionMode?: boolean;
+  selectedIds?: string[];
+  onToggleSelect?: (photoId: string, selected: boolean) => void;
 }
 
-const PhotoGrid = ({ photos, viewMode = "browse", albums = [], onAlbumClick }: PhotoGridProps) => {
+const PhotoGrid = ({
+  photos,
+  viewMode = "browse",
+  albums = [],
+  onAlbumClick,
+  selectionMode = false,
+  selectedIds = [],
+  onToggleSelect,
+}: PhotoGridProps) => {
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
 
+  const isPhotoSelected = (photoId: string) => selectedIds.includes(photoId);
+
   if (viewMode === "list") {
+    const isEmpty = albums.length === 0 && photos.length === 0;
     return (
       <>
         <div className="flex flex-col gap-1">
@@ -36,12 +52,30 @@ const PhotoGrid = ({ photos, viewMode = "browse", albums = [], onAlbumClick }: P
             </button>
           ))}
           {photos.map((photo, i) => (
-            <button
+            <div
               key={photo.id}
-              type="button"
-              onClick={() => setPreviewIndex(i)}
-              className="flex items-center gap-3 rounded-lg border border-border bg-card px-3 py-2 text-left hover:bg-accent/50 transition-colors"
+              className={`flex items-center gap-3 rounded-lg border border-border bg-card px-3 py-2 text-left hover:bg-accent/50 transition-colors ${
+                selectionMode ? "cursor-default" : "cursor-pointer"
+              } ${isPhotoSelected(photo.id) ? "border-primary ring-2 ring-primary/20" : ""}`}
+              onClick={() => {
+                if (selectionMode) {
+                  onToggleSelect?.(photo.id, !isPhotoSelected(photo.id));
+                } else {
+                  setPreviewIndex(i);
+                }
+              }}
             >
+              {selectionMode && (
+                <div
+                  className={`h-5 w-5 rounded border-2 flex items-center justify-center shrink-0 ${
+                    isPhotoSelected(photo.id)
+                      ? "bg-primary border-primary"
+                      : "border-muted-foreground"
+                  }`}
+                >
+                  {isPhotoSelected(photo.id) && <span className="text-primary-foreground text-xs">✓</span>}
+                </div>
+              )}
               <img
                 src={photo.url}
                 alt={photo.fileName}
@@ -65,10 +99,16 @@ const PhotoGrid = ({ photos, viewMode = "browse", albums = [], onAlbumClick }: P
                   }}
                 />
               )}
-            </button>
+            </div>
           ))}
         </div>
-        {previewIndex !== null && (
+        {isEmpty && (
+          <EmptyPhotosState
+            title="No photos in this album"
+            description="Upload photos to see them here."
+          />
+        )}
+        {previewIndex !== null && !selectionMode && (
           <PhotoPreviewModal photos={photos} initialIndex={previewIndex} open onClose={() => setPreviewIndex(null)} />
         )}
       </>
@@ -76,6 +116,7 @@ const PhotoGrid = ({ photos, viewMode = "browse", albums = [], onAlbumClick }: P
   }
 
   if (viewMode === "grid") {
+    const isEmpty = albums.length === 0 && photos.length === 0;
     return (
       <>
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
@@ -92,24 +133,66 @@ const PhotoGrid = ({ photos, viewMode = "browse", albums = [], onAlbumClick }: P
             </button>
           ))}
           {photos.map((photo, i) => (
-            <PhotoCard key={photo.id} photo={photo} onClick={() => setPreviewIndex(i)} />
+            selectionMode ? (
+              <PhotoCard
+                key={photo.id}
+                photo={photo}
+                selected={isPhotoSelected(photo.id)}
+                onSelect={(s) => onToggleSelect?.(photo.id, s)}
+              />
+            ) : (
+              <PhotoCard key={photo.id} photo={photo} onClick={() => setPreviewIndex(i)} />
+            )
           ))}
         </div>
-        {previewIndex !== null && (
+        {isEmpty && (
+          <EmptyPhotosState
+            title="No photos yet"
+            description="Upload photos to get started."
+          />
+        )}
+        {previewIndex !== null && !selectionMode && (
           <PhotoPreviewModal photos={photos} initialIndex={previewIndex} open onClose={() => setPreviewIndex(null)} />
         )}
       </>
     );
   }
 
+  // Browse mode (masonry)
+  const columns = useMemo(() => {
+    const colCount = 4;
+    const cols: typeof photos[] = Array.from({ length: colCount }, () => []);
+    photos.forEach((photo, i) => cols[i % colCount].push(photo));
+    return cols;
+  }, [photos]);
+
   return (
     <>
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-        {photos.map((photo, i) => (
-          <PhotoCard key={photo.id} photo={photo} onClick={() => setPreviewIndex(i)} />
+      <div className="flex gap-4">
+        {columns.map((col, colIdx) => (
+          <div key={colIdx} className="flex flex-1 flex-col gap-4">
+            {col.map((photo) =>
+              selectionMode ? (
+                <PhotoCard
+                  key={photo.id}
+                  photo={photo}
+                  selected={isPhotoSelected(photo.id)}
+                  onSelect={(s) => onToggleSelect?.(photo.id, s)}
+                />
+              ) : (
+                <PhotoCard key={photo.id} photo={photo} onClick={() => setPreviewIndex(photos.indexOf(photo))} />
+              )
+            )}
+          </div>
         ))}
       </div>
-      {previewIndex !== null && (
+      {photos.length === 0 && (
+        <EmptyPhotosState
+          title="No photos yet"
+          description="Upload photos to get started."
+        />
+      )}
+      {previewIndex !== null && !selectionMode && (
         <PhotoPreviewModal photos={photos} initialIndex={previewIndex} open onClose={() => setPreviewIndex(null)} />
       )}
     </>
