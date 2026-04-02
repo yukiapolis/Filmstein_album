@@ -35,12 +35,14 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose }: PhotoPreview
   const photo = photos[index];
 
   const handleDownload = async () => {
-    const src = photo.file_url || photo.url;
+    const src = photo.url || photo.file_url;
     const filename =
       (photo as unknown as Record<string, unknown>).original_name as string ||
       (photo as unknown as Record<string, unknown>).name as string ||
       photo.fileName ||
       "photo.jpg";
+
+    if (!src) return;
 
     try {
       const res = await fetch(src);
@@ -83,7 +85,7 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose }: PhotoPreview
 
       <div className="max-h-[85vh] max-w-[85vw]" onClick={(e) => e.stopPropagation()}>
         <img
-          src={photo.url.replace("w=400&h=300", "w=1200&h=900")}
+          src={photo.url}
           alt={photo.fileName}
           className="max-h-[85vh] max-w-[85vw] object-contain"
         />

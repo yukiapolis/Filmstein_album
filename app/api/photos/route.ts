@@ -9,7 +9,6 @@ export async function PATCH(req: Request) {
       return Response.json({ success: false, error: 'No photo IDs provided' }, { status: 400 })
     }
 
-    // folderId can be null (move to All Photos) or a valid folder id
     const updates: Record<string, unknown> = {}
     if (folderId === null || folderId === 'null') {
       updates.folder_id = null
@@ -20,7 +19,7 @@ export async function PATCH(req: Request) {
     const { error } = await supabase
       .from('photos')
       .update(updates)
-      .in('id', photoIds)
+      .in('global_photo_id', photoIds)
 
     if (error) {
       return Response.json({ success: false, error: error.message }, { status: 500 })

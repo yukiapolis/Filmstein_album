@@ -36,6 +36,8 @@ export interface Photo {
   albumId?: string;
   folder?: string;
   folderId?: string;
+  originalFileId?: string;
+  retouchedFileId?: string;
 }
 
 export interface UploadFile {

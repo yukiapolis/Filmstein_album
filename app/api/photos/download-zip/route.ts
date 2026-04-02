@@ -2,140 +2,132 @@ export const runtime = 'nodejs';
 
 import { NextRequest } from "next/server";
 import JSZip from "jszip";
+import { createClient } from "@supabase/supabase-js";
+import { resolvePhotoPublicUrl } from "@/lib/resolvePhotoPublicUrl";
 
 const MAX_PHOTOS = 50;
 
-export async function POST(request: NextRequest) {
-  console.log("[download-zip] === START ===");
-  console.log("[download-zip] Request method:", request.method);
+type FileRow = {
+  id: string;
+  file_name: string | null;
+  original_file_name: string | null;
+  object_key: string | null;
+  storage_provider: string | null;
+  bucket_name: string | null;
+};
 
+type PhotoRow = {
+  global_photo_id: string;
+  original_file: FileRow | FileRow[] | null;
+  retouched_file: FileRow | FileRow[] | null;
+};
+
+function firstFile(value: FileRow | FileRow[] | null | undefined): FileRow | null {
+  if (!value) return null;
+  return Array.isArray(value) ? value[0] ?? null : value;
+}
+
+export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    console.log("[download-zip] Request body:", JSON.stringify(body, null, 2));
-
     const { photoIds } = body;
-    console.log("[download-zip] photoIds:", photoIds);
-    console.log("[download-zip] photoIds length:", photoIds?.length);
 
     if (!Array.isArray(photoIds) || photoIds.length === 0) {
-      const err = "photoIds is required and must be a non-empty array";
-      console.log("[download-zip] Validation failed:", err);
-      return Response.json({ error: err }, { status: 400 });
+      return Response.json({ error: "photoIds is required and must be a non-empty array" }, { status: 400 });
     }
 
     if (photoIds.length > MAX_PHOTOS) {
-      const err = `Maximum ${MAX_PHOTOS} photos allowed, got ${photoIds.length}`;
-      console.log("[download-zip] Validation failed:", err);
-      return Response.json({ error: err }, { status: 400 });
+      return Response.json({ error: `Maximum ${MAX_PHOTOS} photos allowed, got ${photoIds.length}` }, { status: 400 });
     }
 
-    console.log("[download-zip] Creating Supabase client...");
     const supabaseUrl = process.env.SUPABASE_URL;
     const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
     if (!supabaseUrl || !supabaseKey) {
-      console.error("[download-zip] Missing Supabase env:", {
-        SUPABASE_URL: supabaseUrl ? "set" : "MISSING",
-        SUPABASE_SERVICE_ROLE_KEY: supabaseKey ? "set" : "MISSING",
-      });
       return Response.json({ error: "Missing Supabase env" }, { status: 500 });
     }
 
-    const { createClient } = await import("@supabase/supabase-js");
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    console.log("[download-zip] Querying Supabase for photos...");
     const { data: photos, error } = await supabase
       .from("photos")
-      .select("id, file_url, file_name")
-      .in("id", photoIds);
-
-    console.log("[download-zip] Supabase query result:");
-    console.log("[download-zip]   - error:", error);
-    console.log("[download-zip]   - photos count:", photos?.length ?? 0);
-    console.log("[download-zip]   - photos:", JSON.stringify(photos, null, 2));
+      .select("global_photo_id, original_file_id, retouched_file_id")
+      .in("global_photo_id", photoIds);
 
     if (error) {
-      const errMsg = `Supabase error: ${error.message}`;
-      console.log("[download-zip] Returning error:", errMsg);
-      return Response.json({ error: errMsg }, { status: 500 });
+      return Response.json({ error: error.message }, { status: 500 });
     }
 
     if (!photos || photos.length === 0) {
-      const errMsg = "No photos found for the given IDs";
-      console.log("[download-zip] Returning error:", errMsg);
-      return Response.json({ error: errMsg }, { status: 404 });
+      return Response.json({ error: "No photos found for the given IDs" }, { status: 404 });
     }
+
+    const fileIds = Array.from(
+      new Set(
+        photos
+          .flatMap((photo) => [photo.original_file_id, photo.retouched_file_id])
+          .filter((v): v is string => typeof v === "string" && v.length > 0),
+      ),
+    );
+
+    let fileMap = new Map<string, FileRow>();
+    if (fileIds.length > 0) {
+      const { data: fileRows, error: fileError } = await supabase
+        .from("photo_files")
+        .select("id, file_name, original_file_name, object_key, storage_provider, bucket_name")
+        .in("id", fileIds);
+
+      if (fileError) {
+        return Response.json({ error: fileError.message }, { status: 500 });
+      }
+
+      fileMap = new Map((fileRows ?? []).map((row) => [row.id, row as FileRow]));
+    }
+
+    const joinedPhotos: PhotoRow[] = photos.map((photo) => ({
+      global_photo_id: photo.global_photo_id,
+      original_file: photo.original_file_id ? fileMap.get(photo.original_file_id) ?? null : null,
+      retouched_file: photo.retouched_file_id ? fileMap.get(photo.retouched_file_id) ?? null : null,
+    }));
 
     const zip = new JSZip();
     let successCount = 0;
-    let failCount = 0;
 
-    console.log("[download-zip] === Starting image downloads ===");
+    for (const photo of joinedPhotos) {
+      const activeFile = firstFile(photo.retouched_file) ?? firstFile(photo.original_file);
+      if (!activeFile) continue;
 
-    for (const photo of photos) {
-      console.log(`[download-zip] Processing photo:`);
-      console.log(`[download-zip]   - id: ${photo.id}`);
-      console.log(`[download-zip]   - file_url: ${photo.file_url}`);
-      console.log(`[download-zip]   - file_name: ${photo.file_name}`);
+      const src = resolvePhotoPublicUrl(activeFile as unknown as Record<string, unknown>);
+      if (!src) continue;
 
       try {
-        if (!photo.file_url) {
-          console.warn(`[download-zip] Skip: no file_url for photo ${photo.id}`);
-          failCount++;
-          continue;
-        }
-
-        console.log(`[download-zip] Fetching: ${photo.file_url}`);
-        const res = await fetch(photo.file_url);
-        console.log(`[download-zip]   fetch status: ${res.status}`);
-
-        if (!res.ok) {
-          console.warn(`[download-zip] Skip: HTTP ${res.status} for ${photo.file_url}`);
-          failCount++;
-          continue;
-        }
+        const res = await fetch(src);
+        if (!res.ok) continue;
 
         const buffer = await res.arrayBuffer();
-        console.log(`[download-zip]   buffer size: ${buffer.byteLength} bytes`);
-
         const fileName =
-          photo.file_name ||
-          decodeURIComponent(photo.file_url.split("/").pop() || "image.jpg");
+          activeFile.file_name ||
+          activeFile.original_file_name ||
+          activeFile.object_key?.split("/").pop() ||
+          `${photo.global_photo_id}.jpg`;
 
-        console.log(`[download-zip]   adding to zip as: ${fileName}`);
         zip.file(fileName, buffer);
         successCount++;
-        console.log(`[download-zip]   successCount now: ${successCount}`);
-      } catch (err) {
-        console.warn(`[download-zip] Skip failed image: ${photo.file_url}`, err);
-        failCount++;
+      } catch {
+        // skip failed image
       }
     }
 
-    console.log("[download-zip] === Image downloads complete ===");
-    console.log(`[download-zip] successCount: ${successCount}, failCount: ${failCount}`);
-
     if (successCount === 0) {
-      const errMsg = "No valid images - all images failed to download";
-      console.log("[download-zip] Returning error:", errMsg);
-      return Response.json({ error: errMsg }, { status: 400 });
+      return Response.json({ error: "No valid images - all images failed to download" }, { status: 400 });
     }
 
-    console.log("[download-zip] Generating zip buffer...");
     const zipBuffer = await zip.generateAsync({
       type: "nodebuffer",
       compression: "DEFLATE",
       compressionOptions: { level: 6 },
     });
-    console.log(`[download-zip] Zip buffer size: ${zipBuffer.length} bytes`);
 
-    if (!zipBuffer || zipBuffer.length === 0) {
-      console.error("[download-zip] Zip buffer is empty");
-      return new Response("Zip generation failed", { status: 500 });
-    }
-
-    console.log("[download-zip] === SUCCESS - returning zip ===");
     return new Response(new Uint8Array(zipBuffer), {
       headers: {
         "Content-Type": "application/zip",
@@ -144,11 +136,6 @@ export async function POST(request: NextRequest) {
       },
     });
   } catch (err) {
-    console.error("[download-zip] === ERROR ===");
-    console.error("[download-zip] download zip failed:", err);
-    console.error("[download-zip] error message:", err instanceof Error ? err.message : String(err));
-    console.error("[download-zip] error stack:", err instanceof Error ? err.stack : "no stack");
-
     return Response.json(
       {
         error: err instanceof Error ? err.message : "Internal server error",

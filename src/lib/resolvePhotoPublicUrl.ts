@@ -63,7 +63,9 @@ export function resolvePhotoPublicUrl(row: Record<string, unknown>): string {
 
   for (const v of keyFields) {
     if (typeof v === "string" && v.length > 0) {
-      const path = v.replace(/^\/+/, "").split("?")[0];
+      const trimmed = v.trim();
+      if (/^https?:\/\//i.test(trimmed)) return trimmed;
+      const path = trimmed.replace(/^\/+/, "").split("?")[0];
       if (path) return `${base}/${path}`;
     }
   }
