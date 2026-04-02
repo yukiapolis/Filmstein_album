@@ -45,9 +45,13 @@ const PhotoCard = ({
     onSelect?.(!selected);
   };
 
-  const openDownload = (href: string | undefined) => {
-    if (!href) return;
-    window.open(href, "_blank", "noopener,noreferrer");
+  const openDownload = (variant: "display" | "original") => {
+    const a = document.createElement("a");
+    a.href = `/api/photos/${photo.id}/download?variant=${variant}`;
+    a.download = photo.fileName || "photo.jpg";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
     setShowDownloadMenu(false);
   };
 
@@ -117,11 +121,11 @@ const PhotoCard = ({
   return (
     <div
       className={cn(
-        "overflow-hidden rounded-xl border border-border bg-card shadow-sm transition-all",
+        "overflow-visible rounded-xl border border-border bg-card shadow-sm transition-all",
         selected ? "ring-2 ring-sky-500/70 shadow-md" : "hover:shadow-md",
       )}
     >
-      <div className="group relative aspect-[4/3] cursor-pointer overflow-hidden bg-muted" onClick={onClick}>
+      <div className="group relative aspect-[4/3] cursor-pointer overflow-hidden rounded-t-xl bg-muted" onClick={onClick}>
         <img
           src={imageSrc}
           alt={photo.fileName}
@@ -132,9 +136,13 @@ const PhotoCard = ({
           loading="lazy"
         />
 
+        {photo.isPublished === false && (
+          <div className="absolute inset-0 z-10 bg-black/35 pointer-events-none" />
+        )}
+
         {selected && <div className="absolute inset-0 z-10 bg-black/20 pointer-events-none" />}
 
-        <div className="absolute left-2 top-2 z-20">
+        <div className="absolute left-2 top-2 z-20 flex flex-col gap-1">
           <span
             className={cn(
               "inline-flex items-center rounded-md px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
@@ -143,9 +151,17 @@ const PhotoCard = ({
                 : "border border-border/80 bg-white/95 text-muted-foreground shadow-sm",
             )}
           >
-            {isEdited ? "retouched" : "original"}
+            original
           </span>
         </div>
+
+        {photo.isPublished === false && (
+          <div className="absolute inset-0 z-20 flex items-center justify-center pointer-events-none">
+            <span className="inline-flex items-center rounded-md bg-black/75 px-3 py-1 text-xs font-semibold text-white shadow-sm">
+              未发布
+            </span>
+          </div>
+        )}
 
         {colorInfo && (
           <div
@@ -184,7 +200,7 @@ const PhotoCard = ({
           </p>
           <p className="text-xs text-muted-foreground">{uploadedAt}</p>
         </div>
-        <div className="relative shrink-0" ref={menuRef}>
+        <div className="relative z-30 shrink-0" ref={menuRef}>
           <button
             type="button"
             onClick={(e) => {
@@ -198,13 +214,13 @@ const PhotoCard = ({
             <Download className="h-4 w-4" />
           </button>
           {showDownloadMenu && (
-            <div className="absolute right-0 top-8 z-30 min-w-40 rounded-lg border border-border bg-card p-1 shadow-lg">
+            <div className="absolute right-0 top-8 z-50 min-w-40 rounded-lg border border-border bg-card p-1 shadow-lg">
               <button
                 type="button"
                 className="block w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted"
                 onClick={(e) => {
                   e.stopPropagation();
-                  openDownload((photo as Photo & { displayUrl?: string; downloadUrl?: string }).displayUrl || photo.file_url || photo.url);
+                  openDownload("display");
                 }}
               >
                 下载当前版本
@@ -214,7 +230,7 @@ const PhotoCard = ({
                 className="block w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted"
                 onClick={(e) => {
                   e.stopPropagation();
-                  openDownload((photo as Photo & { originalUrl?: string }).originalUrl || photo.url);
+                  openDownload("original");
                 }}
               >
                 下载原图

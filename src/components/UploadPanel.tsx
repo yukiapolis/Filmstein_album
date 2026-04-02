@@ -200,8 +200,8 @@ const UploadPanel = ({
   const allDone = pendingCount === 0 && files.length > 0;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="w-full max-w-lg rounded-xl border border-border bg-card shadow-xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="flex max-h-[calc(100vh-2rem)] w-full max-w-lg flex-col overflow-hidden rounded-xl border border-border bg-card shadow-xl">
         <div className="flex items-center justify-between border-b border-border px-6 py-4">
           <h2 className="text-base font-semibold text-foreground">Upload Photos</h2>
           <button type="button" onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors">
@@ -209,7 +209,7 @@ const UploadPanel = ({
           </button>
         </div>
 
-        <div className="p-6 space-y-5">
+        <div className="space-y-5 overflow-y-auto p-6">
           {/* Hidden file input */}
           <input
             ref={inputRef}
@@ -309,7 +309,7 @@ const UploadPanel = ({
                   </Button>
                 )}
               </div>
-              <ul className="space-y-2">
+              <ul className="max-h-80 space-y-2 overflow-y-auto pr-1">
                 {files.map((file) => (
                   <li key={file.id} className="flex items-center gap-3 rounded-lg bg-surface px-3 py-2.5">
                     {statusIcon(file.status)}
