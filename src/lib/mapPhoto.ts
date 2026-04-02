@@ -4,8 +4,8 @@ function toStringValue(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
 
-function toNumberValue(value: unknown): number | null {
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
+function toStringOrEmpty(value: unknown): string {
+  return typeof value === "string" ? value : "";
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -26,8 +26,8 @@ export function mapRowToPhoto(row: Record<string, unknown>) {
     toStringValue(activeFile?.original_file_name) ||
     "untitled";
 
-  const branchType = toNumberValue(activeFile?.branch_type);
-  const photoStatus = branchType === 1 ? "original" : "edited";
+  const branchType = toStringOrEmpty(activeFile?.branch_type);
+  const photoStatus = branchType === "original" || branchType === "raw" ? "original" : "edited";
 
   return {
     id: toStringValue(row.global_photo_id) || toStringValue(row.id),

@@ -57,7 +57,6 @@ create table public.new_photos (
 create table public.new_photo_files (
   id uuid primary key default gen_random_uuid(),
   photo_id text not null references public.new_photos(global_photo_id) on delete cascade,
-  source_file_id uuid null references public.new_photo_files(id) on delete set null,
   branch_type smallint not null,
   version_no int not null default 1,
   variant_type smallint not null default 1,
@@ -76,7 +75,7 @@ create table public.new_photo_files (
   created_by text null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
-  constraint new_photo_files_branch_type_check check (branch_type in (1,2,3)),
+  constraint new_photo_files_branch_type_check check (branch_type in (1,2,3,4)),
   constraint new_photo_files_variant_type_check check (variant_type in (1,2,3,4)),
   constraint new_photo_files_version_no_check check (version_no >= 1),
   constraint new_photo_files_width_check check (width is null or width > 0),
@@ -90,7 +89,6 @@ create index new_photos_project_id_idx on public.new_photos(project_id);
 create index new_photos_folder_id_idx on public.new_photos(folder_id);
 create index new_photos_current_file_id_idx on public.new_photos(current_file_id);
 create index new_photo_files_photo_id_idx on public.new_photo_files(photo_id);
-create index new_photo_files_source_file_id_idx on public.new_photo_files(source_file_id);
 create index new_photo_files_branch_version_idx on public.new_photo_files(photo_id, branch_type, version_no);
 create index new_photo_files_variant_idx on public.new_photo_files(photo_id, variant_type);
 
@@ -132,11 +130,15 @@ left join public.project_folders pf
 -- ====================
 -- 3. 迁移旧 photos 文件 -> new_photo_files
 -- ====================
+-- 当前系统未来运行期语义：
+--   1 = original_jpg
+--   2 = raw
+--   3 = thumb
+--   4 = display
 
 insert into public.new_photo_files (
   id,
   photo_id,
-  source_file_id,
   branch_type,
   version_no,
   variant_type,
@@ -159,7 +161,6 @@ insert into public.new_photo_files (
 select
   gen_random_uuid(),
   p.global_photo_id,
-  null,
   1,
   1,
   1,
@@ -187,7 +188,6 @@ from public.photos p;
 insert into public.new_photo_files (
   id,
   photo_id,
-  source_file_id,
   branch_type,
   version_no,
   variant_type,
@@ -210,11 +210,10 @@ insert into public.new_photo_files (
 select
   pv.id,
   p.global_photo_id,
-  null,
   case pv.branch_type
     when 'origin' then 1
-    when 'manual' then 2
-    when 'ai' then 3
+    when 'manual' then 4
+    when 'ai' then 4
     else 1
   end,
   coalesce(pv.version_no, 1),
