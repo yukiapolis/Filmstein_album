@@ -1,15 +1,103 @@
+import { promises as fs } from 'node:fs'
+import path from 'node:path'
+import crypto from 'node:crypto'
+import sharp from 'sharp'
 import { supabase } from '../../../src/lib/supabase/server'
 import { r2 } from '../../../src/lib/r2/client'
 import { PutObjectCommand } from '@aws-sdk/client-s3'
+
+const BRANCH_TYPE_ORIGINAL = 'original';
+const BRANCH_TYPE_RAW = 'raw';
+const BRANCH_TYPE_THUMB = 'thumb';
+const BRANCH_TYPE_DISPLAY = 'display';
 
 function buildGlobalPhotoId() {
   return `GP-${crypto.randomUUID().replace(/-/g, '').slice(0, 12).toUpperCase()}`;
 }
 
-function parseIntField(value: FormDataEntryValue | null, fallback: number) {
-  if (typeof value !== 'string' || !value.trim()) return fallback;
-  const n = Number.parseInt(value, 10);
-  return Number.isFinite(n) ? n : fallback;
+function sanitizeFileName(name: string) {
+  return name.replace(/[^a-zA-Z0-9._-]+/g, '_');
+}
+
+function detectUploadKind(file: File): 'raw' | 'image' {
+  const lower = file.name.toLowerCase();
+  if (/\.(cr2|cr3|nef|arw|dng|raf|rw2|orf|pef|srw)$/.test(lower)) return 'raw';
+  if (/\.(jpg|jpeg|png|webp)$/.test(lower)) return 'image';
+  return 'image';
+}
+
+function getOriginalsRoot() {
+  return process.env.LOCAL_ORIGINALS_DIR || path.join(process.cwd(), 'storage', 'originals');
+}
+
+function sha256(buffer: Buffer) {
+  return crypto.createHash('sha256').update(buffer).digest('hex');
+}
+
+async function getImageMetadata(buffer: Buffer) {
+  const metadata = await sharp(buffer).metadata();
+  const exifPayload: Record<string, unknown> = {
+    format: metadata.format ?? null,
+    space: metadata.space ?? null,
+    channels: metadata.channels ?? null,
+    density: metadata.density ?? null,
+    hasProfile: metadata.hasProfile ?? null,
+    hasAlpha: metadata.hasAlpha ?? null,
+    orientation: metadata.orientation ?? null,
+  };
+
+  return {
+    width: metadata.width ?? null,
+    height: metadata.height ?? null,
+    exif: exifPayload,
+  };
+}
+
+async function saveLocalOriginal(params: {
+  projectId: string;
+  photoId: string;
+  branchType: string;
+  fileName: string;
+  buffer: Buffer;
+}) {
+  const branchDir = params.branchType === BRANCH_TYPE_RAW ? 'raw' : 'original';
+  const dir = path.join(getOriginalsRoot(), params.projectId, params.photoId, branchDir);
+  await fs.mkdir(dir, { recursive: true });
+  const filePath = path.join(dir, sanitizeFileName(params.fileName));
+  await fs.writeFile(filePath, params.buffer);
+  return filePath;
+}
+
+async function buildThumb(buffer: Buffer) {
+  return sharp(buffer)
+    .rotate()
+    .resize({ width: 200, height: 200, fit: 'inside', withoutEnlargement: true })
+    .jpeg({ quality: 70, mozjpeg: true })
+    .toBuffer();
+}
+
+async function buildDisplay(buffer: Buffer) {
+  return sharp(buffer)
+    .rotate()
+    .resize({ width: 4000, height: 4000, fit: 'inside', withoutEnlargement: true })
+    .jpeg({ quality: 82, mozjpeg: true })
+    .toBuffer();
+}
+
+async function uploadToR2(params: {
+  key: string;
+  body: Buffer;
+  contentType: string;
+}) {
+  await r2.send(new PutObjectCommand({
+    Bucket: process.env.R2_BUCKET_NAME!,
+    Key: params.key,
+    Body: params.body,
+    ContentType: params.contentType,
+  }));
+
+  const base = (process.env.R2_PUBLIC_BASE_URL || process.env.NEXT_PUBLIC_PHOTO_PUBLIC_BASE_URL || '').replace(/\/+$/, '');
+  return `${base}/${params.key}`;
 }
 
 export async function POST(req: Request) {
@@ -19,9 +107,6 @@ export async function POST(req: Request) {
     const projectId = formData.get('projectId') as string | null;
     const folderId = formData.get('folderId') as string | null;
     const photoId = formData.get('photoId') as string | null;
-    const branchType = parseIntField(formData.get('branchType'), 1);
-    const versionNo = parseIntField(formData.get('versionNo'), 1);
-    const variantType = parseIntField(formData.get('variantType'), 1);
 
     if (!file) {
       return new Response(JSON.stringify({ success: false, error: 'Missing file' }), { status: 400 });
@@ -32,11 +117,12 @@ export async function POST(req: Request) {
     }
 
     let targetPhotoId = photoId?.trim() || null;
+    let targetProjectId = projectId?.trim() || null;
 
     if (targetPhotoId) {
       const { data: existingPhoto, error: existingPhotoError } = await supabase
         .from('photos')
-        .select('global_photo_id')
+        .select('global_photo_id, project_id')
         .eq('global_photo_id', targetPhotoId)
         .maybeSingle();
 
@@ -47,13 +133,15 @@ export async function POST(req: Request) {
       if (!existingPhoto) {
         return new Response(JSON.stringify({ success: false, error: 'Photo not found' }), { status: 404 });
       }
+
+      targetProjectId = String(existingPhoto.project_id);
     } else {
       targetPhotoId = buildGlobalPhotoId();
       const { error: photoError } = await supabase
         .from('photos')
         .insert([{
           global_photo_id: targetPhotoId,
-          project_id: projectId,
+          project_id: targetProjectId,
           folder_id: folderId || null,
           star_rating: 0,
           status: 1,
@@ -65,62 +153,164 @@ export async function POST(req: Request) {
       }
     }
 
-    const buffer = Buffer.from(await file.arrayBuffer());
-    const keyPrefix = projectId || 'misc';
-    const key = `${keyPrefix}/${Date.now()}-${file.name.replace(/\s+/g, '_')}`;
+    if (!targetProjectId) {
+      return new Response(JSON.stringify({ success: false, error: 'Missing resolved projectId' }), { status: 400 });
+    }
 
-    await r2.send(new PutObjectCommand({
-      Bucket: process.env.R2_BUCKET_NAME!,
-      Key: key,
-      Body: buffer,
-      ContentType: file.type || 'application/octet-stream',
-    }));
+    const uploadKind = detectUploadKind(file);
+    const originalBuffer = Buffer.from(await file.arrayBuffer());
+    const originalBranchType = uploadKind === 'raw' ? BRANCH_TYPE_RAW : BRANCH_TYPE_ORIGINAL;
+    const originalLocalPath = await saveLocalOriginal({
+      projectId: targetProjectId,
+      photoId: targetPhotoId,
+      branchType: originalBranchType,
+      fileName: file.name,
+      buffer: originalBuffer,
+    });
 
-    const publicUrl = `${process.env.R2_PUBLIC_BASE_URL}/${key}`;
+    let originalWidth: number | null = null;
+    let originalHeight: number | null = null;
+    let originalExif: Record<string, unknown> = {};
 
-    const { data: fileRow, error: fileError } = await supabase
+    if (uploadKind === 'image') {
+      const originalMeta = await getImageMetadata(originalBuffer);
+      originalWidth = originalMeta.width;
+      originalHeight = originalMeta.height;
+      originalExif = originalMeta.exif;
+    }
+
+    const originalInsert = {
+      photo_id: targetPhotoId,
+      branch_type: originalBranchType,
+      version_no: 1,
+      variant_type: 1,
+      file_name: file.name,
+      original_file_name: file.name,
+      storage_provider: 'local',
+      bucket_name: 'local-originals',
+      object_key: originalLocalPath,
+      mime_type: file.type || null,
+      file_size_bytes: file.size,
+      width: originalWidth,
+      height: originalHeight,
+      checksum_sha256: sha256(originalBuffer),
+      exif: originalExif,
+      processing_meta: {},
+      created_by: null,
+    };
+
+    const createdFileIds: Record<string, string | null> = {
+      original: null,
+      thumb: null,
+      display: null,
+    };
+
+    const { data: originalFileRow, error: originalFileError } = await supabase
       .from('photo_files')
-      .insert([{
-        photo_id: targetPhotoId,
-        source_file_id: null,
-        branch_type: branchType,
-        version_no: versionNo,
-        variant_type: variantType,
-        file_name: file.name,
-        original_file_name: file.name,
-        storage_provider: 'r2',
-        bucket_name: process.env.R2_BUCKET_NAME!,
-        object_key: publicUrl,
-        mime_type: file.type || null,
-        file_size_bytes: file.size,
-        metadata: {},
-        exif: {},
-        processing_meta: {},
-        created_by: null,
-      }])
+      .insert([originalInsert])
       .select('id')
       .single();
 
-    if (fileError || !fileRow) {
-      return new Response(JSON.stringify({
-        success: false,
-        error: fileError?.message || 'Failed to create photo file',
-      }), { status: 500 });
+    if (originalFileError || !originalFileRow) {
+      return new Response(JSON.stringify({ success: false, error: originalFileError?.message || 'Failed to create original file row' }), { status: 500 });
+    }
+
+    createdFileIds.original = originalFileRow.id;
+
+    let displayUrl = '';
+
+    if (uploadKind === 'image') {
+      const thumbBuffer = await buildThumb(originalBuffer);
+      const displayBuffer = await buildDisplay(originalBuffer);
+      const thumbMeta = await getImageMetadata(thumbBuffer);
+      const displayMeta = await getImageMetadata(displayBuffer);
+      const safeName = sanitizeFileName(file.name.replace(/\.[^.]+$/, ''));
+      const baseKey = `${targetProjectId}/${targetPhotoId}`;
+      const thumbKey = `${baseKey}/thumb/${safeName}.jpg`;
+      const displayKey = `${baseKey}/display/${safeName}.jpg`;
+
+      const thumbUrl = await uploadToR2({
+        key: thumbKey,
+        body: thumbBuffer,
+        contentType: 'image/jpeg',
+      });
+
+      displayUrl = await uploadToR2({
+        key: displayKey,
+        body: displayBuffer,
+        contentType: 'image/jpeg',
+      });
+
+      const { data: thumbRow, error: thumbError } = await supabase
+        .from('photo_files')
+        .insert([{
+          photo_id: targetPhotoId,
+          branch_type: BRANCH_TYPE_THUMB,
+          version_no: 1,
+          variant_type: 1,
+          file_name: `${safeName}.jpg`,
+          original_file_name: file.name,
+          storage_provider: 'r2',
+          bucket_name: process.env.R2_BUCKET_NAME!,
+          object_key: thumbUrl,
+          mime_type: 'image/jpeg',
+          file_size_bytes: thumbBuffer.length,
+          width: thumbMeta.width,
+          height: thumbMeta.height,
+          checksum_sha256: sha256(thumbBuffer),
+          exif: thumbMeta.exif,
+          processing_meta: { derived_from: 'original' },
+          created_by: null,
+        }])
+        .select('id')
+        .single();
+
+      if (thumbError || !thumbRow) {
+        return new Response(JSON.stringify({ success: false, error: thumbError?.message || 'Failed to create thumb row' }), { status: 500 });
+      }
+      createdFileIds.thumb = thumbRow.id;
+
+      const { data: displayRow, error: displayError } = await supabase
+        .from('photo_files')
+        .insert([{
+          photo_id: targetPhotoId,
+          branch_type: BRANCH_TYPE_DISPLAY,
+          version_no: 1,
+          variant_type: 1,
+          file_name: `${safeName}.jpg`,
+          original_file_name: file.name,
+          storage_provider: 'r2',
+          bucket_name: process.env.R2_BUCKET_NAME!,
+          object_key: displayUrl,
+          mime_type: 'image/jpeg',
+          file_size_bytes: displayBuffer.length,
+          width: displayMeta.width,
+          height: displayMeta.height,
+          checksum_sha256: sha256(displayBuffer),
+          exif: displayMeta.exif,
+          processing_meta: { derived_from: 'original' },
+          created_by: null,
+        }])
+        .select('id')
+        .single();
+
+      if (displayError || !displayRow) {
+        return new Response(JSON.stringify({ success: false, error: displayError?.message || 'Failed to create display row' }), { status: 500 });
+      }
+      createdFileIds.display = displayRow.id;
     }
 
     const photoUpdates: Record<string, unknown> = {
       updated_at: new Date().toISOString(),
     };
 
-    if (branchType === 1 && variantType === 1) {
-      photoUpdates.original_file_id = fileRow.id;
-      if (!photoId) {
-        photoUpdates.retouched_file_id = fileRow.id;
-      }
+    if (createdFileIds.original) {
+      photoUpdates.original_file_id = createdFileIds.original;
     }
-
-    if (branchType === 2 || branchType === 3) {
-      photoUpdates.retouched_file_id = fileRow.id;
+    if (createdFileIds.display) {
+      photoUpdates.retouched_file_id = createdFileIds.display;
+    } else if (!photoId && createdFileIds.original) {
+      photoUpdates.retouched_file_id = createdFileIds.original;
     }
 
     const { error: updateError } = await supabase
@@ -134,15 +324,17 @@ export async function POST(req: Request) {
 
     return new Response(JSON.stringify({
       success: true,
-      url: publicUrl,
+      url: displayUrl || null,
       photoId: targetPhotoId,
-      fileId: fileRow.id,
+      originalFileId: createdFileIds.original,
+      thumbFileId: createdFileIds.thumb,
+      displayFileId: createdFileIds.display,
     }), { status: 200 });
   } catch (err) {
     console.error('upload error:', err);
     return new Response(JSON.stringify({
       success: false,
-      error: 'Server error',
+      error: err instanceof Error ? err.message : 'Server error',
     }), { status: 500 });
   }
 }

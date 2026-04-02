@@ -7,12 +7,13 @@
 - 逻辑图片层：项目、文件夹、收藏/状态/标签
 - 文件层：文件名、URL、原图信息
 
-后面又补了 `photo_versions`，导致结构开始朝“版本表”走，但你这次的目标更明确：
+后面又补了 `photo_versions`，导致结构开始朝“版本表”走。但按照现在确认下来的业务语义：
 
 - `photos` 只保留逻辑图片字段
-- 所有真实文件统一进 `photo_files`
+- `photo_files` 只表示存储池中的真实文件资产
+- 文件与逻辑图片的关系只需要表达“属于哪张逻辑图片”，不需要在文件表内部维护父子派生链
 
-所以这次重构的核心不是继续堆 `photo_versions`，而是把**文件级信息彻底下沉到 `photo_files`**，让 `photos` 变成干净的逻辑主表。
+所以这次重构的核心不是继续堆 `photo_versions`，而是把**文件级信息彻底下沉到 `photo_files`**，并去掉不必要的文件自引用字段，让 `photos` 变成干净的逻辑主表。
 
 ## 2. 最终目标表结构
 
@@ -58,16 +59,15 @@
 
 ### photo_files
 
-所有真实文件统一表。
+所有真实文件统一表。当前方案里，`branch_type` 不再表示 origin/manual/ai 一类“处理分支”，而是直接表示文件类型。
 
 | 字段 | 类型 | 约束 | 说明 |
 |---|---|---|---|
 | id | uuid | PK | 文件记录主键 |
 | photo_id | text | NOT NULL, FK -> photos(global_photo_id) | 所属逻辑图片 |
-| source_file_id | uuid | NULL, FK -> photo_files(id) | 来源文件 |
-| branch_type | smallint | NOT NULL | 1 origin / 2 manual / 3 ai |
-| version_no | int | NOT NULL DEFAULT 1 | 分支内版本号 |
-| variant_type | smallint | NOT NULL DEFAULT 1 | 1 master / 2 preview / 3 thumbnail / 4 compressed |
+| branch_type | text | NOT NULL | original / raw / thumb / display |
+| version_no | int | NOT NULL DEFAULT 1 | 版本号（当前第一阶段通常固定为 1） |
+| variant_type | smallint | NOT NULL DEFAULT 1 | 预留字段，当前第一阶段可固定为 1 |
 | file_name | text | NULL | 当前文件名 |
 | original_file_name | text | NULL | 原始文件名 |
 | storage_provider | text | NOT NULL | 存储提供方 |
@@ -86,7 +86,7 @@
 
 建议约束：
 
-- `branch_type in (1,2,3)`
+- `branch_type in ('original','raw','thumb','display')`
 - `variant_type in (1,2,3,4)`
 - `version_no >= 1`
 - `(width is null or width > 0)`
@@ -98,7 +98,8 @@
 说明：
 
 - 这里不用把 `object_key` 单独做唯一主键，因为未来可能多存储源共存；所以用 `(storage_provider, bucket_name, object_key)` 更稳。
-- `unique(photo_id, branch_type, version_no, variant_type)` 可以保证“同一逻辑图、同一分支、同一版本、同一种变体”只有一条记录，足够简洁。
+- `unique(photo_id, branch_type, version_no, variant_type)` 可以保证“同一逻辑图、同一文件类型、同一版本、同一种变体”只有一条记录，足够简洁。
+- `source_file_id` 已移除，因为当前业务语义不是文件之间的父子派生树，而是“存储池中的独立文件资产 + 逻辑图片对这些资产的版本归属关系”。
 
 ## 4. 完整迁移 SQL
 
@@ -163,8 +164,7 @@ create table public.new_photos (
 create table public.new_photo_files (
   id uuid primary key default gen_random_uuid(),
   photo_id text not null references public.new_photos(global_photo_id) on delete cascade,
-  source_file_id uuid null references public.new_photo_files(id) on delete set null,
-  branch_type smallint not null,
+  branch_type text not null,
   version_no int not null default 1,
   variant_type smallint not null default 1,
   file_name text null,
@@ -182,7 +182,7 @@ create table public.new_photo_files (
   created_by text null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
-  constraint new_photo_files_branch_type_check check (branch_type in (1,2,3)),
+  constraint new_photo_files_branch_type_check check (branch_type in ('original','raw','thumb','display')),
   constraint new_photo_files_variant_type_check check (variant_type in (1,2,3,4)),
   constraint new_photo_files_version_no_check check (version_no >= 1),
   constraint new_photo_files_width_check check (width is null or width > 0),
@@ -196,7 +196,6 @@ create index new_photos_project_id_idx on public.new_photos(project_id);
 create index new_photos_folder_id_idx on public.new_photos(folder_id);
 create index new_photos_current_file_id_idx on public.new_photos(current_file_id);
 create index new_photo_files_photo_id_idx on public.new_photo_files(photo_id);
-create index new_photo_files_source_file_id_idx on public.new_photo_files(source_file_id);
 create index new_photo_files_branch_version_idx on public.new_photo_files(photo_id, branch_type, version_no);
 create index new_photo_files_variant_idx on public.new_photo_files(photo_id, variant_type);
 
@@ -238,13 +237,12 @@ left join public.project_folders pf
 -- ====================
 -- 3. 迁移原始文件 -> new_photo_files
 -- ====================
--- 规则：旧 photos 里仅有单一文件信息时，视为 origin/master/v1
+-- 规则：旧 photos 里仅有单一文件信息时，视为 original_jpg/v1
 -- bucket_name 若旧数据没有，先统一写 filmstein；object_key 优先取 file_url，后退到 file_name
 
 insert into public.new_photo_files (
   id,
   photo_id,
-  source_file_id,
   branch_type,
   version_no,
   variant_type,
@@ -267,7 +265,6 @@ insert into public.new_photo_files (
 select
   gen_random_uuid(),
   p.global_photo_id,
-  null,
   1,
   1,
   1,
@@ -292,16 +289,17 @@ from public.photos p;
 -- 4. 迁移 photo_versions -> new_photo_files
 -- ====================
 -- 规则：
--- branch_type 映射：origin=1, manual=2, ai=3
--- variant_type 若旧表没有明确字段，则按以下规则推断：
---   - processing_meta->>'variant_type' = preview/thumbnail/compressed 时映射 2/3/4
---   - 否则统一按 1(master)
--- source_file_id 先留空，避免复杂自引用映射；如后续确需补链，可再按 object_key / 派生规则回填
+-- 旧表迁移阶段仍沿用旧 branch_type 数值映射进入新表，但新系统语义将改为：
+--   1 = original_jpg
+--   2 = raw
+--   3 = thumb
+--   4 = display
+-- variant_type 当前保留为兼容字段，后续可进一步收敛
+-- 不保留 source_file_id，因为当前业务不要求在文件表内部维护派生链
 
 insert into public.new_photo_files (
   id,
   photo_id,
-  source_file_id,
   branch_type,
   version_no,
   variant_type,
@@ -324,7 +322,6 @@ insert into public.new_photo_files (
 select
   pv.id,
   p.global_photo_id,
-  null,
   case pv.branch_type
     when 'origin' then 1
     when 'manual' then 2
