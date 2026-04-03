@@ -10,6 +10,7 @@ const BRANCH_TYPE_ORIGINAL = 'original';
 const BRANCH_TYPE_RAW = 'raw';
 const BRANCH_TYPE_THUMB = 'thumb';
 const BRANCH_TYPE_DISPLAY = 'display';
+const GLOBAL_PHOTO_ID_RE = /GP-[A-Z0-9]{12,}/i;
 
 function buildGlobalPhotoId() {
   return `GP-${crypto.randomUUID().replace(/-/g, '').slice(0, 12).toUpperCase()}`;
@@ -17,6 +18,12 @@ function buildGlobalPhotoId() {
 
 function sanitizeFileName(name: string) {
   return name.replace(/[^a-zA-Z0-9._-]+/g, '_');
+}
+
+function appendVersionSuffix(fileName: string, versionNo: number) {
+  const ext = path.extname(fileName);
+  const base = fileName.slice(0, fileName.length - ext.length) || fileName;
+  return `${sanitizeFileName(base)}_v${versionNo}${ext}`;
 }
 
 function detectUploadKind(file: File): 'raw' | 'image' {
@@ -140,6 +147,30 @@ export async function POST(req: Request) {
     let targetPhotoId = photoId?.trim() || null;
     let targetProjectId = projectId?.trim() || null;
 
+    if (!targetPhotoId) {
+      const embeddedPhotoId = file.name.match(GLOBAL_PHOTO_ID_RE)?.[0]?.toUpperCase() || null;
+      if (embeddedPhotoId) {
+        let existingPhotoQuery = supabase
+          .from('photos')
+          .select('global_photo_id, project_id')
+          .eq('global_photo_id', embeddedPhotoId);
+
+        if (targetProjectId) {
+          existingPhotoQuery = existingPhotoQuery.eq('project_id', targetProjectId);
+        }
+
+        const { data: matchedPhoto, error: matchedPhotoError } = await existingPhotoQuery.maybeSingle();
+        if (matchedPhotoError) {
+          return new Response(JSON.stringify({ success: false, error: matchedPhotoError.message }), { status: 500 });
+        }
+
+        if (matchedPhoto) {
+          targetPhotoId = String(matchedPhoto.global_photo_id);
+          targetProjectId = String(matchedPhoto.project_id);
+        }
+      }
+    }
+
     if (targetPhotoId) {
       const { data: existingPhoto, error: existingPhotoError } = await supabase
         .from('photos')
@@ -182,11 +213,27 @@ export async function POST(req: Request) {
     const uploadKind = detectUploadKind(file);
     const originalBuffer = Buffer.from(await file.arrayBuffer());
     const originalBranchType = uploadKind === 'raw' ? BRANCH_TYPE_RAW : BRANCH_TYPE_ORIGINAL;
+
+    let nextVersionNo = 1;
+    if (targetPhotoId) {
+      const { data: existingVersions, error: existingVersionsError } = await supabase
+        .from('photo_files')
+        .select('version_no')
+        .eq('photo_id', targetPhotoId);
+
+      if (existingVersionsError) {
+        return new Response(JSON.stringify({ success: false, error: existingVersionsError.message }), { status: 500 });
+      }
+
+      const maxVersion = Math.max(0, ...((existingVersions ?? []).map((row) => Number(row.version_no) || 0)));
+      nextVersionNo = maxVersion + 1;
+    }
+    const originalStorageName = appendVersionSuffix(file.name, nextVersionNo);
     const originalLocalPath = await saveLocalAsset({
       projectId: targetProjectId,
       photoId: targetPhotoId,
       branchDir: originalBranchType === BRANCH_TYPE_RAW ? 'raw' : 'original',
-      fileName: file.name,
+      fileName: originalStorageName,
       buffer: originalBuffer,
     });
 
@@ -204,9 +251,9 @@ export async function POST(req: Request) {
     const originalInsert = {
       photo_id: targetPhotoId,
       branch_type: originalBranchType,
-      version_no: 1,
+      version_no: nextVersionNo,
       variant_type: 1,
-      file_name: file.name,
+      file_name: originalStorageName,
       original_file_name: file.name,
       storage_provider: 'local',
       bucket_name: 'local-originals',
@@ -247,10 +294,11 @@ export async function POST(req: Request) {
       const thumbMeta = await getImageMetadata(thumbBuffer);
       const displayMeta = await getImageMetadata(displayBuffer);
       const safeName = sanitizeFileName(file.name.replace(/\.[^.]+$/, ''));
-      const displayFileName = `${safeName}.jpg`;
+      const versionedBaseName = `${safeName}_v${nextVersionNo}`;
+      const displayFileName = `${versionedBaseName}.jpg`;
       const baseKey = `${targetProjectId}/${targetPhotoId}`;
-      const thumbKey = `${baseKey}/thumb/${safeName}.jpg`;
-      const displayKey = `${baseKey}/display/${safeName}.jpg`;
+      const thumbKey = `${baseKey}/thumb/${versionedBaseName}.jpg`;
+      const displayKey = `${baseKey}/display/${versionedBaseName}.jpg`;
 
       const thumbUrl = await uploadToR2({
         key: thumbKey,
@@ -279,9 +327,9 @@ export async function POST(req: Request) {
         .insert([{
           photo_id: targetPhotoId,
           branch_type: BRANCH_TYPE_THUMB,
-          version_no: 1,
+          version_no: nextVersionNo,
           variant_type: 1,
-          file_name: `${safeName}.jpg`,
+          file_name: `${versionedBaseName}.jpg`,
           original_file_name: file.name,
           storage_provider: 'r2',
           bucket_name: process.env.R2_BUCKET_NAME!,
@@ -308,7 +356,7 @@ export async function POST(req: Request) {
         .insert([{
           photo_id: targetPhotoId,
           branch_type: BRANCH_TYPE_DISPLAY,
-          version_no: 1,
+          version_no: nextVersionNo,
           variant_type: 1,
           file_name: displayFileName,
           original_file_name: file.name,

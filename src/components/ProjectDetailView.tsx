@@ -382,6 +382,22 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
   };
 
   const handleDeleteCurrentVersion = async (photo: Photo) => {
+    const displayFileId = (photo as Photo & { displayFileId?: string }).displayFileId;
+    const fileId = displayFileId || photo.retouchedFileId;
+    if (!fileId) return;
+
+    const res = await fetch(`/api/photos/${photo.id}?mode=current-version&fileId=${encodeURIComponent(fileId)}`, {
+      method: 'DELETE',
+    });
+    const body = await res.json();
+    if (body.success) {
+      await refreshPhotos();
+    } else {
+      console.error('Delete failed:', body.error);
+    }
+  };
+
+  const handleDeleteAllVersions = async (photo: Photo) => {
     const res = await fetch(`/api/photos/${photo.id}?mode=all-versions`, {
       method: 'DELETE',
     });
@@ -871,6 +887,7 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
                 selectedIds={Array.from(selectedPhotoIds)}
                 cardVariant="gallery"
                 onDeletePhoto={handleDeleteCurrentVersion}
+                onDeleteAllVersions={handleDeleteAllVersions}
                 onTogglePublish={handleTogglePublish}
               />
             ) : (

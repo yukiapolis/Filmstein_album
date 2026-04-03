@@ -38,7 +38,12 @@ export function mapRowToPhoto(row: Record<string, unknown>) {
   const branchType =
     toStringOrEmpty(originalFile?.branch_type) ||
     toStringOrEmpty(displayActiveFile?.branch_type);
-  const photoStatus = branchType === "original" || branchType === "raw" ? "original" : "original";
+  const latestVersionNo = Math.max(
+    Number(asRecord(originalFile)?.version_no) || 0,
+    Number(asRecord(displayActiveFile)?.version_no) || 0,
+    Number(asRecord(thumbFile)?.version_no) || 0,
+  );
+  const photoStatus = latestVersionNo > 1 ? "edited" : (branchType === "original" || branchType === "raw" ? "original" : "original");
 
   return {
     id: toStringValue(row.global_photo_id) || toStringValue(row.id),
