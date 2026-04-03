@@ -18,6 +18,10 @@ interface PhotoGridProps {
   selectedIds?: string[];
   /** Card layout: gallery shows filename row below image */
   cardVariant?: "gallery" | "overlay";
+  hideStatusBadge?: boolean;
+  hideMetaOverlay?: boolean;
+  hideDownloadButton?: boolean;
+  gridClassName?: string;
   onDeletePhoto?: (photo: Photo) => Promise<void> | void;
   onTogglePublish?: (photo: Photo, isPublished: boolean) => Promise<void> | void;
 }
@@ -30,6 +34,10 @@ const PhotoGrid = ({
   onToggleSelect,
   selectedIds = [],
   cardVariant = "gallery",
+  hideStatusBadge = false,
+  hideMetaOverlay = false,
+  hideDownloadButton = false,
+  gridClassName,
   onDeletePhoto,
   onTogglePublish,
 }: PhotoGridProps) => {
@@ -134,7 +142,7 @@ const PhotoGrid = ({
   const isEmpty = photos.length === 0;
   return (
     <>
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+      <div className={gridClassName || "grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4"}>
         {photos.map((photo, i) => (
           <PhotoCard
             key={photo.id}
@@ -146,6 +154,9 @@ const PhotoGrid = ({
             onSelect={
               selectionActive ? (s) => onToggleSelect?.(photo.id, s) : undefined
             }
+            hideStatusBadge={hideStatusBadge}
+            hideMetaOverlay={hideMetaOverlay}
+            hideDownloadButton={hideDownloadButton}
           />
         ))}
       </div>

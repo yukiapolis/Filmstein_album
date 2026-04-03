@@ -28,7 +28,13 @@ const EmptyState = ({ message }: { message?: string }) => (
   </div>
 );
 
-const ClientGallery = ({ photos: externalPhotos }: { photos?: Photo[] }) => {
+const ClientGallery = ({
+  photos: externalPhotos,
+  presentation = "default",
+}: {
+  photos?: Photo[];
+  presentation?: "default" | "preview";
+}) => {
   const params = useParams();
   const id = params?.id as string | undefined;
 
@@ -232,11 +238,74 @@ const ClientGallery = ({ photos: externalPhotos }: { photos?: Photo[] }) => {
     }
   };
 
-  const showSidebar = viewMode !== "list";
+  const cleanPreview = presentation === "preview";
+  const showSidebar = !cleanPreview && viewMode !== "list";
+
+  if (cleanPreview) {
+    return (
+      <div className="min-h-screen bg-gradient-to-b from-background via-surface to-background">
+        <main className="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 sm:py-10 lg:px-8 lg:py-12">
+          {loading ? (
+            <p className="py-12 text-center text-sm text-muted-foreground">Loading photos…</p>
+          ) : error ? (
+            <p className="py-12 text-center text-sm text-destructive" role="alert">
+              {error}
+            </p>
+          ) : filtered.length === 0 ? (
+            <EmptyState message="No published photos yet." />
+          ) : (
+            <div className="space-y-6 sm:space-y-8">
+              <section className="space-y-5 px-1 pt-2 sm:px-2">
+                <div className="relative overflow-hidden rounded-3xl bg-muted shadow-sm">
+                  <div className="aspect-[16/9] sm:aspect-[16/7] lg:aspect-[16/5]">
+                    <img
+                      src={project?.cover_url || "/default-cover.svg"}
+                      alt={projectName}
+                      className="h-full w-full object-cover"
+                    />
+                  </div>
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/20 to-black/5" />
+                  <div className="absolute inset-x-0 bottom-0 p-5 sm:p-7 lg:p-8">
+                    <div className="mx-auto max-w-5xl">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-white/75">
+                        Preview Gallery
+                      </p>
+                      <h1 className="mt-3 text-3xl font-semibold tracking-tight text-white drop-shadow-sm sm:text-4xl lg:text-5xl">
+                        {projectName}
+                      </h1>
+                      <p className="mt-3 max-w-2xl text-sm leading-6 text-white/80 sm:text-base">
+                        Published highlights, presented in a clean gallery made for desktop review and mobile sharing.
+                      </p>
+                      <div className="mt-4 inline-flex items-center rounded-full border border-white/20 bg-black/25 px-4 py-1.5 text-sm text-white/85 backdrop-blur">
+                        {filtered.length} published photos
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </section>
+
+              <section className="mx-auto w-full max-w-7xl">
+                <PhotoGrid
+                  photos={filtered}
+                  viewMode="grid"
+                  selectedIds={[]}
+                  cardVariant="overlay"
+                  hideStatusBadge
+                  hideMetaOverlay
+                  hideDownloadButton
+                  gridClassName="grid grid-cols-2 gap-2.5 sm:grid-cols-3 sm:gap-3 lg:grid-cols-4 lg:gap-4 xl:grid-cols-5 2xl:grid-cols-6"
+                />
+              </section>
+            </div>
+          )}
+        </main>
+      </div>
+    );
+  }
 
   return (
-    <div className="min-h-screen bg-surface">
-      <header className="border-b border-border bg-card">
+    <div className={cleanPreview ? "min-h-screen bg-gradient-to-b from-background via-surface to-background" : "min-h-screen bg-surface"}>
+      {!cleanPreview && <header className="border-b border-border bg-card">
         <div className="container flex h-14 items-center justify-between gap-4">
           <div className="flex min-w-0 flex-1 items-center gap-2 text-sm">
             <Link
@@ -334,7 +403,7 @@ const ClientGallery = ({ photos: externalPhotos }: { photos?: Photo[] }) => {
             </Button>
           </div>
         </div>
-      </header>
+      </header>}
 
       <main className="container py-6">
         {loading ? (
@@ -367,92 +436,95 @@ const ClientGallery = ({ photos: externalPhotos }: { photos?: Photo[] }) => {
             )}
 
             <div className="min-w-0 flex-1 space-y-4">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="flex items-center gap-1 rounded-lg border border-border p-1">
-                  <button
-                    type="button"
-                    title="Grid"
-                    onClick={() => setViewMode("grid")}
-                    className={`rounded p-1.5 transition-colors ${
-                      viewMode === "grid"
-                        ? "bg-primary text-primary-foreground"
-                        : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                    }`}
-                  >
-                    <LayoutGrid className="h-4 w-4" />
-                  </button>
-                  <button
-                    type="button"
-                    title="List"
-                    onClick={() => setViewMode("list")}
-                    className={`rounded p-1.5 transition-colors ${
-                      viewMode === "list"
-                        ? "bg-primary text-primary-foreground"
-                        : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                    }`}
-                  >
-                    <List className="h-4 w-4" />
-                  </button>
-                </div>
-              </div>
+              {!cleanPreview && (
+                <>
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex items-center gap-1 rounded-lg border border-border p-1">
+                      <button
+                        type="button"
+                        title="Grid"
+                        onClick={() => setViewMode("grid")}
+                        className={`rounded p-1.5 transition-colors ${
+                          viewMode === "grid"
+                            ? "bg-primary text-primary-foreground"
+                            : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                        }`}
+                      >
+                        <LayoutGrid className="h-4 w-4" />
+                      </button>
+                      <button
+                        type="button"
+                        title="List"
+                        onClick={() => setViewMode("list")}
+                        className={`rounded p-1.5 transition-colors ${
+                          viewMode === "list"
+                            ? "bg-primary text-primary-foreground"
+                            : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                        }`}
+                      >
+                        <List className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
 
-              <div className="rounded-xl border border-border bg-card p-4">
-                <div className="flex flex-wrap items-center gap-3">
-                  <span className="text-sm font-semibold">{filtered.length} photos</span>
-                  <div className="relative min-w-[160px] max-w-xs flex-1">
-                    <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-                    <Input
-                      placeholder="Search…"
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      className="h-9 pl-8"
-                    />
+                  <div className="rounded-xl border border-border bg-card p-4">
+                    <div className="flex flex-wrap items-center gap-3">
+                      <span className="text-sm font-semibold">{filtered.length} photos</span>
+                      <div className="relative min-w-[160px] max-w-xs flex-1">
+                        <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                        <Input
+                          placeholder="Search…"
+                          value={searchQuery}
+                          onChange={(e) => setSearchQuery(e.target.value)}
+                          className="h-9 pl-8"
+                        />
+                      </div>
+                      <ColorFilterBar active={activeTag} onChange={setActiveTag} />
+                      <div className="ml-auto flex items-center gap-2">
+                        <Button type="button" variant="outline" size="sm" onClick={cycleSort}>
+                          <ArrowUpDown className="mr-1.5 h-3.5 w-3.5" />
+                          Sort
+                        </Button>
+                        <select
+                          value={sortKey}
+                          onChange={(e) => setSortKey(e.target.value as "date" | "name")}
+                          className="h-9 rounded-md border border-input bg-background px-2 text-xs"
+                        >
+                          <option value="date">Date</option>
+                          <option value="name">Name</option>
+                        </select>
+                      </div>
+                    </div>
                   </div>
-                  <ColorFilterBar active={activeTag} onChange={setActiveTag} />
-                  <div className="ml-auto flex items-center gap-2">
-                    <Button type="button" variant="outline" size="sm" onClick={cycleSort}>
-                      <ArrowUpDown className="mr-1.5 h-3.5 w-3.5" />
-                      Sort
-                    </Button>
-                    <select
-                      value={sortKey}
-                      onChange={(e) => setSortKey(e.target.value as "date" | "name")}
-                      className="h-9 rounded-md border border-input bg-background px-2 text-xs"
-                    >
-                      <option value="date">Date</option>
-                      <option value="name">Name</option>
-                    </select>
-                  </div>
-                </div>
-              </div>
 
-              {/* All files row */}
-              {filtered.length > 0 && (
-                selections.size > 0 ? (
-                  <div className="flex items-center gap-2 text-sm font-medium text-sky-600">
-                    {selections.size} photo{selections.size !== 1 ? "s" : ""} selected — individual selection active
-                    <button
-                      type="button"
-                      onClick={clearSelections}
-                      className="ml-1 text-xs underline underline-offset-2 hover:text-foreground"
-                    >
-                      Clear all
-                    </button>
-                  </div>
-                ) : (
-                  <label className="flex cursor-pointer items-center gap-2 text-sm text-foreground hover:text-sky-600 transition-colors">
-                    <input
-                      type="checkbox"
-                      className="h-4 w-4 rounded border-input"
-                      checked={allFilteredSelected}
-                      ref={(el) => {
-                        if (el) el.indeterminate = someFilteredSelected && !allFilteredSelected;
-                      }}
-                      onChange={toggleSelectAll}
-                    />
-                    All files
-                  </label>
-                )
+                  {filtered.length > 0 && (
+                    selections.size > 0 ? (
+                      <div className="flex items-center gap-2 text-sm font-medium text-sky-600">
+                        {selections.size} photo{selections.size !== 1 ? "s" : ""} selected — individual selection active
+                        <button
+                          type="button"
+                          onClick={clearSelections}
+                          className="ml-1 text-xs underline underline-offset-2 hover:text-foreground"
+                        >
+                          Clear all
+                        </button>
+                      </div>
+                    ) : (
+                      <label className="flex cursor-pointer items-center gap-2 text-sm text-foreground hover:text-sky-600 transition-colors">
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4 rounded border-input"
+                          checked={allFilteredSelected}
+                          ref={(el) => {
+                            if (el) el.indeterminate = someFilteredSelected && !allFilteredSelected;
+                          }}
+                          onChange={toggleSelectAll}
+                        />
+                        All files
+                      </label>
+                    )
+                  )}
+                </>
               )}
 
               <PhotoGrid

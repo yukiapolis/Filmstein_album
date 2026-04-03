@@ -20,6 +20,7 @@ export interface Album {
   id: string;
   name: string;
   photoCount: number;
+  parentId?: string;
   children?: Album[];
 }
 
