@@ -42,6 +42,7 @@ interface UploadPanelProps {
   open: boolean;
   onClose: () => void;
   projectId?: string;
+  initialFolderId?: string;
   /** Available folders for the current project */
   folders?: FolderItem[];
   /** Called once after at least one file finishes (success or fail), with the
@@ -55,6 +56,7 @@ const UploadPanel = ({
   open,
   onClose,
   projectId,
+  initialFolderId,
   folders = [],
   onUploadDone,
   onFolderCreated,
@@ -70,12 +72,12 @@ const UploadPanel = ({
   // Sync when panel opens
   useEffect(() => {
     if (open) {
-      setSelectedFolderId("");
+      setSelectedFolderId(initialFolderId ?? "");
       setShowNewFolder(false);
       setNewFolderName("");
       setDisplayPreset("4000");
     }
-  }, [open]);
+  }, [open, initialFolderId]);
 
   const addFiles = useCallback((rawFiles: FileList | File[]) => {
     const newFiles: UploadFile[] = Array.from(rawFiles).map((f) => ({

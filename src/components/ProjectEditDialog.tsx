@@ -102,9 +102,9 @@ export default function ProjectEditDialog({
 
         {/* Body */}
         <div className="space-y-4 p-6">
-          {/* Cover image */}
+          {/* Banner image */}
           <div className="space-y-2">
-            <label className="text-sm font-medium text-foreground">Cover Photo</label>
+            <label className="text-sm font-medium text-foreground">Banner Image</label>
             <div className="relative overflow-hidden rounded-lg bg-muted aspect-[3/2]">
               <img
                 src={coverUrl}
@@ -125,7 +125,7 @@ export default function ProjectEditDialog({
                 ) : (
                   <Upload className="mr-1.5 h-3.5 w-3.5" />
                 )}
-                {coverUrl !== project.cover_url ? "Change" : "Upload"} Cover
+                {coverUrl !== project.cover_url ? "Change" : "Upload"} Banner
               </Button>
               <input
                 ref={fileInputRef}

@@ -7,5 +7,5 @@ type PageProps = {
 /** Preview page at /projects/[id]/preview.
  *  ClientGallery handles its own reactive data fetching from /api/projects/[id]. */
 export default async function ProjectPreviewPage(_props: PageProps) {
-  return <ClientGallery />;
+  return <ClientGallery presentation="preview" />;
 }

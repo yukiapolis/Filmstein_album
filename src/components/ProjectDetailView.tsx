@@ -2,6 +2,7 @@
 
 import { useState, useMemo, useEffect, useCallback } from "react";
 import Link from "next/link";
+import Navbar from "@/components/Navbar";
 import {
   ArrowLeft,
   Upload,
@@ -13,7 +14,6 @@ import {
   X,
   Move,
   RefreshCw,
-  SlidersHorizontal,
   Search,
   ArrowUpDown,
   LayoutGrid,
@@ -21,7 +21,6 @@ import {
   Paintbrush,
   Settings,
 } from "lucide-react";
-import Navbar from "@/components/Navbar";
 import PhotoGrid, { type ViewMode } from "@/components/PhotoGrid";
 import StatusBadge from "@/components/StatusBadge";
 import AlbumTree from "@/components/AlbumTree";
@@ -39,6 +38,7 @@ const tabs = ["Photos", "Selections"] as const;
 interface FolderItem {
   id: string;
   name: string;
+  parent_id?: string | null;
 }
 
 const getAllAlbumIds = (albums: Album[]): string[] =>
@@ -89,6 +89,9 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
   const [folders, setFolders] = useState<FolderItem[]>([]);
   const [showNewFolder, setShowNewFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
+  const [manageFoldersOpen, setManageFoldersOpen] = useState(false);
+  const [managedFolderIds, setManagedFolderIds] = useState<Set<string>>(new Set());
+  const [renamingFolderName, setRenamingFolderName] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [sortKey, setSortKey] = useState<"date" | "name">("date");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
@@ -291,7 +294,10 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
       const res = await fetch(`/api/projects/${projectId}/folders`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: trimmed }),
+        body: JSON.stringify({
+          name: trimmed,
+          parentId: activeAlbum !== 'all' ? activeAlbum : null,
+        }),
       });
       const body = await res.json();
       if (body.success) {
@@ -315,6 +321,8 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
     setSelectedPhotoIds(new Set());
     setMoveTargetFolderId("");
   }, []);
+
+  const selectedManagedFolders = folders.filter((folder) => managedFolderIds.has(folder.id));
 
   useEffect(() => {
     setSelectedPhotoIds((prev) => {
@@ -458,6 +466,55 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
     }
   };
 
+  const toggleManagedFolder = (folderId: string, checked: boolean) => {
+    setManagedFolderIds((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(folderId);
+      else next.delete(folderId);
+      return next;
+    });
+  };
+
+  const handleRenameManagedFolder = async () => {
+    if (selectedManagedFolders.length !== 1) return;
+    const target = selectedManagedFolders[0];
+    const name = renamingFolderName.trim();
+    if (!name) return;
+
+    const res = await fetch(`/api/projects/${projectId}/folders`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ folderId: target.id, name }),
+    });
+    const body = await res.json();
+    if (body.success) {
+      await refreshFolders();
+      setRenamingFolderName(name);
+    } else {
+      console.error('Rename folder failed:', body.error);
+    }
+  };
+
+  const handleDeleteManagedFolders = async () => {
+    if (selectedManagedFolders.length === 0) return;
+    const ok = window.confirm(`删除 ${selectedManagedFolders.length} 个子相册？相册内图片将回到 All Photos。`);
+    if (!ok) return;
+
+    const res = await fetch(`/api/projects/${projectId}/folders`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ folderIds: selectedManagedFolders.map((folder) => folder.id) }),
+    });
+    const body = await res.json();
+    if (body.success) {
+      await Promise.all([refreshFolders(), refreshPhotos()]);
+      setManagedFolderIds(new Set());
+      setRenamingFolderName('');
+    } else {
+      console.error('Delete folders failed:', body.error);
+    }
+  };
+
   const cycleSort = () => {
     if (sortKey === "date") {
       setSortDir((d) => (d === "desc" ? "asc" : "desc"));
@@ -477,12 +534,9 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
 
   return (
     <div className="min-h-screen bg-surface">
-      <Navbar />
-
-      {/* Project toolbar — matches DAM-style screenshot */}
-      <header className="border-b border-border bg-card">
-        <div className="container flex h-14 items-center justify-between gap-4">
-          <div className="flex min-w-0 flex-1 items-center gap-2 text-sm">
+      <Navbar
+        breadcrumb={
+          <div className="flex min-w-0 items-center gap-2 text-sm">
             <Link
               href="/"
               className="shrink-0 text-muted-foreground transition-colors hover:text-foreground"
@@ -492,7 +546,20 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
             <span className="text-muted-foreground">/</span>
             <span className="truncate font-medium text-foreground">{heading}</span>
             {showMeta && project && <StatusBadge status={project.status} />}
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="ml-3"
+              onClick={() => setEditOpen(true)}
+              disabled={loading || Boolean(error) || notFound}
+            >
+              <Settings className="mr-1.5 h-3.5 w-3.5" />
+              Project Settings
+            </Button>
           </div>
+        }
+        actions={
           <div className="flex shrink-0 items-center gap-1.5">
             <Button
               type="button"
@@ -504,29 +571,6 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
               disabled={loading || Boolean(error) || notFound}
             >
               <RefreshCw className="h-4 w-4" />
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="hidden sm:inline-flex"
-              disabled={loading || Boolean(error) || notFound}
-              onClick={() => {
-                /* placeholder — decoration tools */
-              }}
-            >
-              <Paintbrush className="mr-1.5 h-3.5 w-3.5" />
-              Decoration
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => setEditOpen(true)}
-              disabled={loading || Boolean(error) || notFound}
-            >
-              <Settings className="mr-1.5 h-3.5 w-3.5" />
-              Settings
             </Button>
             <Button variant="outline" size="sm" asChild>
               <Link
@@ -552,8 +596,8 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
               Share
             </Button>
           </div>
-        </div>
-      </header>
+        }
+      />
 
       <main className="container py-6">
         {error && (
@@ -567,17 +611,34 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
             <aside className="w-full shrink-0 space-y-4 lg:w-56">
               <div className="rounded-xl border border-border bg-card p-3">
                 <div className="mb-3 flex items-center justify-between">
-                  <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                    Albums
-                  </h2>
-                  <button
-                    type="button"
-                    onClick={() => setShowNewFolder(true)}
-                    className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                    title="New album"
-                  >
-                    <Plus className="h-4 w-4" />
-                  </button>
+                  <div>
+                    <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                      Albums
+                    </h2>
+                    {activeAlbum !== 'all' && (
+                      <p className="mt-1 text-[11px] text-muted-foreground">
+                        New album will be created under the current album.
+                      </p>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => setManageFoldersOpen(true)}
+                      className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                      title="Manage albums"
+                    >
+                      <Settings className="h-4 w-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowNewFolder(true)}
+                      className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                      title="New album"
+                    >
+                      <Plus className="h-4 w-4" />
+                    </button>
+                  </div>
                 </div>
                 <AlbumTree
                   albums={albumsForUi}
@@ -591,66 +652,9 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
           )}
 
           <div className="min-w-0 flex-1 space-y-4">
-            {/* Tabs + view mode */}
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex gap-4 border-b border-border sm:border-0">
-                {tabs.map((tab) => (
-                  <button
-                    key={tab}
-                    type="button"
-                    onClick={() => setActiveTab(tab)}
-                    className={`pb-2 text-sm font-medium transition-colors sm:pb-0 ${
-                      activeTab === tab
-                        ? "border-b-2 border-primary text-foreground sm:border-0"
-                        : "text-muted-foreground hover:text-foreground"
-                    }`}
-                  >
-                    {tab}
-                    {tab === "Photos" && (
-                      <span className="ml-1 text-xs text-muted-foreground">({photos.length})</span>
-                    )}
-                    {tab === "Selections" && (
-                      <span className="ml-1 text-xs text-muted-foreground">
-                        ({photos.filter((p) => p.selected).length})
-                      </span>
-                    )}
-                  </button>
-                ))}
-              </div>
-              <div className="flex items-center gap-1 rounded-lg border border-border p-1">
-                <button
-                  type="button"
-                  title="Grid"
-                  onClick={() => setViewMode("grid")}
-                  className={`rounded p-1.5 transition-colors ${
-                    viewMode === "grid" || viewMode === "browse"
-                      ? "bg-primary text-primary-foreground"
-                      : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                  }`}
-                >
-                  <LayoutGrid className="h-4 w-4" />
-                </button>
-                <button
-                  type="button"
-                  title="List"
-                  onClick={() => setViewMode("list")}
-                  className={`rounded p-1.5 transition-colors ${
-                    viewMode === "list"
-                      ? "bg-primary text-primary-foreground"
-                      : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                  }`}
-                >
-                  <List className="h-4 w-4" />
-                </button>
-              </div>
-            </div>
-
             {/* DAM toolbar */}
             <div className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4">
               <div className="flex flex-wrap items-center gap-3">
-                <span className="text-sm font-semibold text-foreground">
-                  {displayPhotos.length} photos
-                </span>
                 <Button
                   type="button"
                   size="sm"
@@ -659,18 +663,6 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
                 >
                   <Upload className="mr-1.5 h-3.5 w-3.5" />
                   Upload
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  disabled={loading || Boolean(error) || notFound}
-                  onClick={() => {
-                    /* compression — placeholder */
-                  }}
-                >
-                  <SlidersHorizontal className="mr-1.5 h-3.5 w-3.5" />
-                  Compress
                 </Button>
                 <div className="relative min-w-[160px] max-w-xs flex-1">
                   <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -685,6 +677,32 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
                   <ColorFilterBar active={colorFilter} onChange={setColorFilter} />
                 </div>
                 <div className="ml-auto flex items-center gap-2">
+                  <div className="flex items-center gap-1 rounded-lg border border-border p-1">
+                    <button
+                      type="button"
+                      title="Grid"
+                      onClick={() => setViewMode("grid")}
+                      className={`rounded p-1.5 transition-colors ${
+                        viewMode === "grid" || viewMode === "browse"
+                          ? "bg-primary text-primary-foreground"
+                          : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                      }`}
+                    >
+                      <LayoutGrid className="h-4 w-4" />
+                    </button>
+                    <button
+                      type="button"
+                      title="List"
+                      onClick={() => setViewMode("list")}
+                      className={`rounded p-1.5 transition-colors ${
+                        viewMode === "list"
+                          ? "bg-primary text-primary-foreground"
+                          : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                      }`}
+                    >
+                      <List className="h-4 w-4" />
+                    </button>
+                  </div>
                   <Button
                     type="button"
                     variant="outline"
@@ -815,20 +833,10 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
             )}
 
             {/* All files row */}
-            {displayPhotos.length > 0 && (
-              selectedPhotoIds.size > 0 ? (
-                <div className="flex items-center gap-2 text-sm font-medium text-sky-600">
-                  {selectedPhotoIds.size} photo{selectedPhotoIds.size !== 1 ? "s" : ""} selected — individual selection active
-                  <button
-                    type="button"
-                    onClick={clearSelection}
-                    className="ml-1 text-xs underline underline-offset-2 hover:text-foreground"
-                  >
-                    Clear all
-                  </button>
-                </div>
-              ) : (
-                <label className="flex cursor-pointer items-center gap-2 text-sm text-foreground hover:text-sky-600 transition-colors">
+            {displayPhotos.length > 0 && selectedPhotoIds.size === 0 && (
+              <div className="flex items-center gap-3 text-sm text-foreground">
+                <span className="font-semibold text-foreground">{displayPhotos.length} photos</span>
+                <label className="flex cursor-pointer items-center gap-2 hover:text-sky-600 transition-colors">
                   <input
                     type="checkbox"
                     className="h-4 w-4 rounded border-input"
@@ -840,7 +848,7 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
                   />
                   All files
                 </label>
-              )
+              </div>
             )}
 
             {loading && !error ? (
@@ -886,6 +894,7 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
         open={uploadOpen}
         onClose={() => setUploadOpen(false)}
         projectId={projectId}
+        initialFolderId={activeAlbum !== 'all' ? activeAlbum : undefined}
         folders={folders}
         onFolderCreated={refreshFolders}
         onUploadDone={refreshPhotos}
@@ -898,6 +907,70 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
           project={project}
           onSaved={(updated) => setProject(updated)}
         />
+      )}
+
+      {manageFoldersOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="flex w-full max-w-xl flex-col rounded-xl border border-border bg-card shadow-xl">
+            <div className="flex items-center justify-between border-b border-border px-6 py-4">
+              <div>
+                <h2 className="text-base font-semibold text-foreground">Manage Albums</h2>
+                <p className="text-sm text-muted-foreground">Single-select to rename, multi-select to delete.</p>
+              </div>
+              <Button variant="ghost" size="sm" onClick={() => setManageFoldersOpen(false)}>Close</Button>
+            </div>
+            <div className="space-y-4 p-6">
+              <div className="space-y-2">
+                {folders.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No albums yet.</p>
+                ) : (
+                  <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
+                    {folders.map((folder) => (
+                      <label key={folder.id} className="flex items-center gap-3 rounded-lg border border-border px-3 py-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={managedFolderIds.has(folder.id)}
+                          onChange={(e) => {
+                            toggleManagedFolder(folder.id, e.target.checked);
+                            if (e.target.checked && managedFolderIds.size === 0) {
+                              setRenamingFolderName(folder.name);
+                            }
+                          }}
+                        />
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate font-medium text-foreground">{folder.name}</p>
+                          {folder.parent_id && <p className="text-xs text-muted-foreground">Sub-album</p>}
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-foreground">Rename selected album</label>
+                <div className="flex gap-2">
+                  <Input
+                    value={renamingFolderName}
+                    onChange={(e) => setRenamingFolderName(e.target.value)}
+                    placeholder={selectedManagedFolders.length === 1 ? 'Album name' : 'Select one album to rename'}
+                    disabled={selectedManagedFolders.length !== 1}
+                  />
+                  <Button type="button" variant="outline" onClick={() => void handleRenameManagedFolder()} disabled={selectedManagedFolders.length !== 1 || !renamingFolderName.trim()}>
+                    Rename
+                  </Button>
+                </div>
+              </div>
+
+              <div className="flex justify-between">
+                <p className="text-sm text-muted-foreground">Deleting albums moves their photos back to All Photos.</p>
+                <Button type="button" variant="destructive" onClick={() => void handleDeleteManagedFolders()} disabled={selectedManagedFolders.length === 0}>
+                  Delete selected
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
 
       {deleteConfirmOpen && (

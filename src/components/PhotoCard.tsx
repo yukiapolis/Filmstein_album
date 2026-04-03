@@ -13,6 +13,9 @@ interface PhotoCardProps {
   onSelect?: (selected: boolean) => void;
   selectionMode?: boolean;
   variant?: "gallery" | "overlay";
+  hideStatusBadge?: boolean;
+  hideMetaOverlay?: boolean;
+  hideDownloadButton?: boolean;
 }
 
 const PhotoCard = ({
@@ -22,6 +25,9 @@ const PhotoCard = ({
   onSelect,
   selectionMode = false,
   variant = "gallery",
+  hideStatusBadge = false,
+  hideMetaOverlay = false,
+  hideDownloadButton = false,
 }: PhotoCardProps) => {
   const colorInfo =
     photo.colorLabel !== "none" ? colorLabelMap[photo.colorLabel] : null;
@@ -61,14 +67,14 @@ const PhotoCard = ({
   if (variant === "overlay") {
     return (
       <div
-        className="group relative cursor-pointer overflow-hidden rounded-lg bg-muted"
+        className="group relative cursor-pointer overflow-hidden rounded-2xl bg-muted/70 shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md"
         onClick={onClick}
       >
         <div className="overflow-hidden">
           <img
             src={imageSrc}
             alt={photo.fileName}
-            className="w-full object-cover transition-transform duration-300 group-hover:scale-105"
+            className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.03]"
             loading="lazy"
           />
         </div>
@@ -81,7 +87,7 @@ const PhotoCard = ({
           />
         )}
 
-        {photo.photoStatus === "original" && (
+        {!hideStatusBadge && photo.photoStatus === "original" && (
           <div className="absolute top-2 left-2 z-20">
             <span className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
               original
@@ -106,14 +112,16 @@ const PhotoCard = ({
           </button>
         )}
 
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/60 to-transparent p-3 pt-8 opacity-0 transition-opacity group-hover:opacity-100">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-xs font-medium text-white">{photo.fileName}</p>
-              <p className="text-xs text-white/70">{photo.tag}</p>
+        {!hideMetaOverlay && (
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/60 to-transparent p-3 pt-8 opacity-0 transition-opacity group-hover:opacity-100">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs font-medium text-white">{photo.fileName}</p>
+                <p className="text-xs text-white/70">{photo.tag}</p>
+              </div>
             </div>
           </div>
-        </div>
+        )}
       </div>
     );
   }
@@ -142,7 +150,7 @@ const PhotoCard = ({
 
         {selected && <div className="absolute inset-0 z-10 bg-black/20 pointer-events-none" />}
 
-        <div className="absolute left-2 top-2 z-20 flex flex-col gap-1">
+        {!hideStatusBadge && <div className="absolute left-2 top-2 z-20 flex flex-col gap-1">
           <span
             className={cn(
               "inline-flex items-center rounded-md px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
@@ -153,7 +161,7 @@ const PhotoCard = ({
           >
             original
           </span>
-        </div>
+        </div>}
 
         {photo.isPublished === false && (
           <div className="absolute inset-0 z-20 flex items-center justify-center pointer-events-none">
@@ -200,7 +208,7 @@ const PhotoCard = ({
           </p>
           <p className="text-xs text-muted-foreground">{uploadedAt}</p>
         </div>
-        <div className="relative z-30 shrink-0" ref={menuRef}>
+        {!hideDownloadButton && <div className="relative z-30 shrink-0" ref={menuRef}>
           <button
             type="button"
             onClick={(e) => {
@@ -237,7 +245,7 @@ const PhotoCard = ({
               </button>
             </div>
           )}
-        </div>
+        </div>}
       </div>
     </div>
   );
