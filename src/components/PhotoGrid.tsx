@@ -23,6 +23,7 @@ interface PhotoGridProps {
   hideDownloadButton?: boolean;
   gridClassName?: string;
   onDeletePhoto?: (photo: Photo) => Promise<void> | void;
+  onDeleteAllVersions?: (photo: Photo) => Promise<void> | void;
   onTogglePublish?: (photo: Photo, isPublished: boolean) => Promise<void> | void;
 }
 
@@ -39,6 +40,7 @@ const PhotoGrid = ({
   hideDownloadButton = false,
   gridClassName,
   onDeletePhoto,
+  onDeleteAllVersions,
   onTogglePublish,
 }: PhotoGridProps) => {
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
@@ -131,6 +133,7 @@ const PhotoGrid = ({
             open
             onClose={() => setPreviewIndex(null)}
             onDeleteCurrent={onDeletePhoto}
+            onDeleteAllVersions={onDeleteAllVersions}
             onTogglePublish={onTogglePublish}
           />
         )}
@@ -170,6 +173,7 @@ const PhotoGrid = ({
           open
           onClose={() => setPreviewIndex(null)}
           onDeleteCurrent={onDeletePhoto}
+          onDeleteAllVersions={onDeleteAllVersions}
           onTogglePublish={onTogglePublish}
         />
       )}

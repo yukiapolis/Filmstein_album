@@ -51,9 +51,18 @@ const PhotoCard = ({
     onSelect?.(!selected);
   };
 
-  const openDownload = (variant: "display" | "original") => {
+  const openDownload = async (variant: "display" | "original") => {
+    const url = `/api/photos/${photo.id}/download?variant=${variant}`;
+    const check = await fetch(url, { method: "HEAD" });
+    if (!check.ok) {
+      const body = await check.json().catch(() => ({}));
+      alert(body.error || "Download failed");
+      setShowDownloadMenu(false);
+      return;
+    }
+
     const a = document.createElement("a");
-    a.href = `/api/photos/${photo.id}/download?variant=${variant}`;
+    a.href = url;
     a.download = photo.fileName || "photo.jpg";
     document.body.appendChild(a);
     a.click();
@@ -159,7 +168,7 @@ const PhotoCard = ({
                 : "border border-border/80 bg-white/95 text-muted-foreground shadow-sm",
             )}
           >
-            original
+            {isEdited ? "retouched" : "original"}
           </span>
         </div>}
 
@@ -228,7 +237,7 @@ const PhotoCard = ({
                 className="block w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted"
                 onClick={(e) => {
                   e.stopPropagation();
-                  openDownload("display");
+                  void openDownload("display");
                 }}
               >
                 下载当前版本
@@ -238,7 +247,7 @@ const PhotoCard = ({
                 className="block w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted"
                 onClick={(e) => {
                   e.stopPropagation();
-                  openDownload("original");
+                  void openDownload("original");
                 }}
               >
                 下载原图

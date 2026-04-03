@@ -14,6 +14,7 @@ type FileRow = {
   bucket_name: string | null
   created_at: string | null
   branch_type: string | null
+  version_no: number | null
 }
 
 const BRANCH_TYPE_ORIGINAL = 'original'
@@ -67,7 +68,7 @@ export async function GET(req: Request, context: RouteContext) {
     if (photoIds.length > 0) {
       const { data: fileRows, error: filesError } = await supabase
         .from('photo_files')
-        .select('id, photo_id, file_name, original_file_name, object_key, storage_provider, bucket_name, created_at, branch_type')
+        .select('id, photo_id, file_name, original_file_name, object_key, storage_provider, bucket_name, created_at, branch_type, version_no')
         .in('photo_id', photoIds)
 
       if (filesError) {
@@ -86,7 +87,11 @@ export async function GET(req: Request, context: RouteContext) {
 
     const project = mapRowToProject(projectRow as Record<string, unknown>)
     const photos = (photoRows ?? []).map((row) => {
-      const fileRows = filesByPhotoId.get(row.global_photo_id) ?? []
+      const fileRows = [...(filesByPhotoId.get(row.global_photo_id) ?? [])].sort((a, b) => {
+        const versionDiff = (Number(b.version_no) || 0) - (Number(a.version_no) || 0)
+        if (versionDiff !== 0) return versionDiff
+        return (b.created_at || '').localeCompare(a.created_at || '')
+      })
       const originalFile = fileRows.find((f) => f.branch_type === BRANCH_TYPE_ORIGINAL) ?? null
       const thumbFile = fileRows.find((f) => f.branch_type === BRANCH_TYPE_THUMB) ?? null
       const displayFile = fileRows.find((f) => f.branch_type === BRANCH_TYPE_DISPLAY) ?? null

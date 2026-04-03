@@ -11,10 +11,11 @@ interface PhotoPreviewModalProps {
   open: boolean;
   onClose: () => void;
   onDeleteCurrent?: (photo: Photo) => Promise<void> | void;
+  onDeleteAllVersions?: (photo: Photo) => Promise<void> | void;
   onTogglePublish?: (photo: Photo, isPublished: boolean) => Promise<void> | void;
 }
 
-const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurrent, onTogglePublish }: PhotoPreviewModalProps) => {
+const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurrent, onDeleteAllVersions, onTogglePublish }: PhotoPreviewModalProps) => {
   const [index, setIndex] = useState(initialIndex);
   const [showDownloadMenu, setShowDownloadMenu] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -42,9 +43,18 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurren
     displayFileId?: string;
   };
 
-  const openDownload = (variant: "display" | "original") => {
+  const openDownload = async (variant: "display" | "original") => {
+    const url = `/api/photos/${photo.id}/download?variant=${variant}`;
+    const check = await fetch(url, { method: "HEAD" });
+    if (!check.ok) {
+      const body = await check.json().catch(() => ({}));
+      alert(body.error || "Download failed");
+      setShowDownloadMenu(false);
+      return;
+    }
+
     const a = document.createElement("a");
-    a.href = `/api/photos/${photo.id}/download?variant=${variant}`;
+    a.href = url;
     a.download = photo.fileName || "photo.jpg";
     document.body.appendChild(a);
     a.click();
@@ -52,11 +62,12 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurren
     setShowDownloadMenu(false);
   };
 
-  const handleDelete = async () => {
-    if (!onDeleteCurrent) return;
+  const handleDelete = async (mode: 'current' | 'all') => {
+    const action = mode === 'all' ? onDeleteAllVersions : onDeleteCurrent;
+    if (!action) return;
     setDeleting(true);
     try {
-      await onDeleteCurrent(photo);
+      await action(photo);
       onClose();
     } finally {
       setDeleting(false);
@@ -110,7 +121,7 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurren
                 className="block w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted"
                 onClick={(e) => {
                   e.stopPropagation();
-                  openDownload("display");
+                  void openDownload("display");
                 }}
               >
                 下载当前版本
@@ -120,7 +131,7 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurren
                 className="block w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted"
                 onClick={(e) => {
                   e.stopPropagation();
-                  openDownload("original");
+                  void openDownload("original");
                 }}
               >
                 下载原图
@@ -171,14 +182,21 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurren
           <div className="w-full max-w-md rounded-xl border border-border bg-card p-5 text-foreground shadow-2xl">
             <h3 className="text-base font-semibold">确认删除</h3>
             <p className="mt-2 text-sm text-muted-foreground">
-              这会删除当前图片的全部版本，并删除对应逻辑照片。此操作不可恢复。
+              {onDeleteCurrent && onDeleteAllVersions
+                ? '你可以只删除当前修图版本，或删除全部版本与逻辑照片。'
+                : '这会删除当前图片的全部版本，并删除对应逻辑照片。此操作不可恢复。'}
             </p>
             <div className="mt-4 flex justify-end gap-2">
               <Button type="button" variant="outline" onClick={() => setShowDeleteConfirm(false)} disabled={deleting}>
                 取消
               </Button>
-              <Button type="button" variant="destructive" onClick={() => void handleDelete()} disabled={deleting}>
-                {deleting ? '删除中…' : '确认删除'}
+              {onDeleteCurrent && onDeleteAllVersions && (
+                <Button type="button" variant="outline" onClick={() => void handleDelete('current')} disabled={deleting}>
+                  {deleting ? '删除中…' : '删除修图版本'}
+                </Button>
+              )}
+              <Button type="button" variant="destructive" onClick={() => void handleDelete('all')} disabled={deleting}>
+                {deleting ? '删除中…' : '删除全部版本'}
               </Button>
             </div>
           </div>
