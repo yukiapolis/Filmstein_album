@@ -6,18 +6,25 @@ type RouteContext = { params: Promise<{ id: string }> }
 
 type FileRow = {
   id: string
+  photo_id: string
   file_name: string | null
   original_file_name: string | null
   object_key: string | null
   storage_provider: string | null
   bucket_name: string | null
   created_at: string | null
-  branch_type: number | null
+  branch_type: string | null
 }
 
-export async function GET(_req: Request, context: RouteContext) {
+const BRANCH_TYPE_ORIGINAL = 'original'
+const BRANCH_TYPE_THUMB = 'thumb'
+const BRANCH_TYPE_DISPLAY = 'display'
+
+export async function GET(req: Request, context: RouteContext) {
   try {
     const { id } = await context.params
+    const url = new URL(req.url)
+    const publishedOnly = url.searchParams.get('publishedOnly') === 'true'
 
     const { data: projectRow, error: projectError } = await supabase
       .from('projects')
@@ -36,10 +43,16 @@ export async function GET(_req: Request, context: RouteContext) {
       return Response.json({ success: false, error: 'Not found' }, { status: 404 })
     }
 
-    const { data: photoRows, error: photosError } = await supabase
+    let photosQuery = supabase
       .from('photos')
-      .select('global_photo_id, project_id, folder_id, original_file_id, retouched_file_id, color_label, status, updated_at')
+      .select('global_photo_id, project_id, folder_id, original_file_id, retouched_file_id, color_label, status, updated_at, is_published')
       .eq('project_id', id)
+
+    if (publishedOnly) {
+      photosQuery = photosQuery.eq('is_published', true)
+    }
+
+    const { data: photoRows, error: photosError } = await photosQuery
 
     if (photosError) {
       return Response.json(
@@ -48,20 +61,14 @@ export async function GET(_req: Request, context: RouteContext) {
       )
     }
 
-    const fileIds = Array.from(
-      new Set(
-        (photoRows ?? [])
-          .flatMap((row) => [row.original_file_id, row.retouched_file_id])
-          .filter((v): v is string => typeof v === 'string' && v.length > 0),
-      ),
-    )
+    const photoIds = (photoRows ?? []).map((row) => row.global_photo_id)
 
-    let fileMap = new Map<string, FileRow>()
-    if (fileIds.length > 0) {
+    let filesByPhotoId = new Map<string, FileRow[]>()
+    if (photoIds.length > 0) {
       const { data: fileRows, error: filesError } = await supabase
         .from('photo_files')
-        .select('id, file_name, original_file_name, object_key, storage_provider, bucket_name, created_at, branch_type')
-        .in('id', fileIds)
+        .select('id, photo_id, file_name, original_file_name, object_key, storage_provider, bucket_name, created_at, branch_type')
+        .in('photo_id', photoIds)
 
       if (filesError) {
         return Response.json(
@@ -70,17 +77,27 @@ export async function GET(_req: Request, context: RouteContext) {
         )
       }
 
-      fileMap = new Map((fileRows ?? []).map((row) => [row.id, row as FileRow]))
+      for (const row of (fileRows ?? []) as FileRow[]) {
+        const list = filesByPhotoId.get(row.photo_id) ?? []
+        list.push(row)
+        filesByPhotoId.set(row.photo_id, list)
+      }
     }
 
     const project = mapRowToProject(projectRow as Record<string, unknown>)
-    const photos = (photoRows ?? []).map((row) =>
-      mapRowToPhoto({
+    const photos = (photoRows ?? []).map((row) => {
+      const fileRows = filesByPhotoId.get(row.global_photo_id) ?? []
+      const originalFile = fileRows.find((f) => f.branch_type === BRANCH_TYPE_ORIGINAL) ?? null
+      const thumbFile = fileRows.find((f) => f.branch_type === BRANCH_TYPE_THUMB) ?? null
+      const displayFile = fileRows.find((f) => f.branch_type === BRANCH_TYPE_DISPLAY) ?? null
+
+      return mapRowToPhoto({
         ...(row as Record<string, unknown>),
-        original_file: row.original_file_id ? fileMap.get(row.original_file_id) ?? null : null,
-        retouched_file: row.retouched_file_id ? fileMap.get(row.retouched_file_id) ?? null : null,
-      }),
-    )
+        original_file: originalFile,
+        thumb_file: thumbFile,
+        display_file: displayFile,
+      })
+    })
     project.photoCount = photos.length
 
     return Response.json({

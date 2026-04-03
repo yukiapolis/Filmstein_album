@@ -57,7 +57,7 @@ const ClientGallery = ({ photos: externalPhotos }: { photos?: Photo[] }) => {
     (async () => {
       try {
         const [projRes, foldersRes] = await Promise.all([
-          fetch(`/api/projects/${id}`),
+          fetch(`/api/projects/${id}?publishedOnly=true`),
           fetch(`/api/projects/${id}/folders`),
         ]);
         const projBody = await projRes.json();
@@ -192,7 +192,7 @@ const ClientGallery = ({ photos: externalPhotos }: { photos?: Photo[] }) => {
   const handleRefresh = async () => {
     if (!id) return;
     try {
-      const res = await fetch(`/api/projects/${id}`);
+      const res = await fetch(`/api/projects/${id}?publishedOnly=true`);
       const body = await res.json();
       if (res.ok && body.success && Array.isArray(body.data?.photos)) {
         setPhotos(body.data.photos as Photo[]);
@@ -286,28 +286,37 @@ const ClientGallery = ({ photos: externalPhotos }: { photos?: Photo[] }) => {
             <Button
               size="sm"
               variant="outline"
-              onClick={() => {
+              onClick={async () => {
                 if (filtered.length === 0) return;
                 setDownloadingAll(true);
-                const photoIds = filtered.map((p) => p.id);
-                fetch("/api/photos/download-zip", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ photoIds }),
-                })
-                  .then((res) => res.blob())
-                  .then((blob) => {
-                    const url = window.URL.createObjectURL(blob);
-                    const a = document.createElement("a");
-                    a.href = url;
-                    a.download = "photos.zip";
-                    document.body.appendChild(a);
-                    a.click();
-                    document.body.removeChild(a);
-                    window.URL.revokeObjectURL(url);
-                  })
-                  .catch(console.error)
-                  .finally(() => setDownloadingAll(false));
+                try {
+                  const photoIds = filtered.map((p) => p.id);
+                  const res = await fetch("/api/photos/download-zip", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ photoIds }),
+                  });
+
+                  if (!res.ok) {
+                    const errBody = await res.json().catch(() => ({}));
+                    throw new Error(errBody.error || "Download failed");
+                  }
+
+                  const blob = await res.blob();
+                  const url = window.URL.createObjectURL(blob);
+                  const a = document.createElement("a");
+                  a.href = url;
+                  a.download = "photos.zip";
+                  document.body.appendChild(a);
+                  a.click();
+                  document.body.removeChild(a);
+                  window.URL.revokeObjectURL(url);
+                } catch (err) {
+                  console.error("Download all error:", err);
+                  alert(err instanceof Error ? err.message : "Download failed");
+                } finally {
+                  setDownloadingAll(false);
+                }
               }}
               disabled={downloadingAll}
             >

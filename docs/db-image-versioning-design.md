@@ -99,7 +99,7 @@
 
 - 这里不用把 `object_key` 单独做唯一主键，因为未来可能多存储源共存；所以用 `(storage_provider, bucket_name, object_key)` 更稳。
 - `unique(photo_id, branch_type, version_no, variant_type)` 可以保证“同一逻辑图、同一文件类型、同一版本、同一种变体”只有一条记录，足够简洁。
-- `source_file_id` 已移除，因为当前业务语义不是文件之间的父子派生树，而是“存储池中的独立文件资产 + 逻辑图片对这些资产的版本归属关系”。
+- 文件之间不维护父子派生链；当前业务语义是“存储池中的独立文件资产 + 逻辑图片对这些资产的版本归属关系”。
 
 ## 4. 完整迁移 SQL
 
@@ -237,7 +237,7 @@ left join public.project_folders pf
 -- ====================
 -- 3. 迁移原始文件 -> new_photo_files
 -- ====================
--- 规则：旧 photos 里仅有单一文件信息时，视为 original_jpg/v1
+-- 规则：旧 photos 里仅有单一文件信息时，视为 original/v1
 -- bucket_name 若旧数据没有，先统一写 filmstein；object_key 优先取 file_url，后退到 file_name
 
 insert into public.new_photo_files (
@@ -265,7 +265,7 @@ insert into public.new_photo_files (
 select
   gen_random_uuid(),
   p.global_photo_id,
-  1,
+  'original',
   1,
   1,
   p.file_name,
@@ -289,13 +289,10 @@ from public.photos p;
 -- 4. 迁移 photo_versions -> new_photo_files
 -- ====================
 -- 规则：
--- 旧表迁移阶段仍沿用旧 branch_type 数值映射进入新表，但新系统语义将改为：
---   1 = original_jpg
---   2 = raw
---   3 = thumb
---   4 = display
+-- 旧表迁移阶段应映射到新的字符串语义：
+--   original / raw / thumb / display
 -- variant_type 当前保留为兼容字段，后续可进一步收敛
--- 不保留 source_file_id，因为当前业务不要求在文件表内部维护派生链
+-- 文件表内部不维护派生链，因为当前业务不要求文件之间的父子依赖关系
 
 insert into public.new_photo_files (
   id,
@@ -323,10 +320,10 @@ select
   pv.id,
   p.global_photo_id,
   case pv.branch_type
-    when 'origin' then 1
-    when 'manual' then 2
-    when 'ai' then 3
-    else 1
+    when 'origin' then 'original'
+    when 'manual' then 'display'
+    when 'ai' then 'display'
+    else 'original'
   end,
   coalesce(pv.version_no, 1),
   case
@@ -384,7 +381,7 @@ from (
   from public.new_photo_files nf
   where nf.variant_type = 1
   order by nf.photo_id,
-           case when nf.branch_type = 1 then 0 else 1 end,
+           case when nf.branch_type = 'original' then 0 else 1 end,
            nf.version_no asc,
            nf.created_at asc,
            nf.id asc

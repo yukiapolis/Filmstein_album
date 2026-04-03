@@ -53,15 +53,14 @@ async function getImageMetadata(buffer: Buffer) {
   };
 }
 
-async function saveLocalOriginal(params: {
+async function saveLocalAsset(params: {
   projectId: string;
   photoId: string;
-  branchType: string;
+  branchDir: 'original' | 'raw' | 'display';
   fileName: string;
   buffer: Buffer;
 }) {
-  const branchDir = params.branchType === BRANCH_TYPE_RAW ? 'raw' : 'original';
-  const dir = path.join(getOriginalsRoot(), params.projectId, params.photoId, branchDir);
+  const dir = path.join(getOriginalsRoot(), params.projectId, params.photoId, params.branchDir);
   await fs.mkdir(dir, { recursive: true });
   const filePath = path.join(dir, sanitizeFileName(params.fileName));
   await fs.writeFile(filePath, params.buffer);
@@ -69,17 +68,34 @@ async function saveLocalOriginal(params: {
 }
 
 async function buildThumb(buffer: Buffer) {
-  return sharp(buffer)
+  let quality = 82;
+  let output = await sharp(buffer)
     .rotate()
-    .resize({ width: 200, height: 200, fit: 'inside', withoutEnlargement: true })
-    .jpeg({ quality: 70, mozjpeg: true })
+    .resize({ width: 400, height: 400, fit: 'inside', withoutEnlargement: true })
+    .jpeg({ quality, mozjpeg: true })
     .toBuffer();
+
+  while (output.length > 100 * 1024 && quality > 40) {
+    quality -= 8;
+    output = await sharp(buffer)
+      .rotate()
+      .resize({ width: 400, height: 400, fit: 'inside', withoutEnlargement: true })
+      .jpeg({ quality, mozjpeg: true })
+      .toBuffer();
+  }
+
+  return output;
 }
 
-async function buildDisplay(buffer: Buffer) {
+async function buildDisplay(buffer: Buffer, preset: 'original' | '6000' | '4000') {
+  if (preset === 'original') {
+    return sharp(buffer).rotate().jpeg({ quality: 92, mozjpeg: true }).toBuffer();
+  }
+
+  const maxEdge = preset === '6000' ? 6000 : 4000;
   return sharp(buffer)
     .rotate()
-    .resize({ width: 4000, height: 4000, fit: 'inside', withoutEnlargement: true })
+    .resize({ width: maxEdge, height: maxEdge, fit: 'inside', withoutEnlargement: true })
     .jpeg({ quality: 82, mozjpeg: true })
     .toBuffer();
 }
@@ -107,6 +123,11 @@ export async function POST(req: Request) {
     const projectId = formData.get('projectId') as string | null;
     const folderId = formData.get('folderId') as string | null;
     const photoId = formData.get('photoId') as string | null;
+    const displayPresetRaw = formData.get('displayPreset');
+    const displayPreset =
+      displayPresetRaw === 'original' || displayPresetRaw === '6000' || displayPresetRaw === '4000'
+        ? displayPresetRaw
+        : '4000';
 
     if (!file) {
       return new Response(JSON.stringify({ success: false, error: 'Missing file' }), { status: 400 });
@@ -145,6 +166,7 @@ export async function POST(req: Request) {
           folder_id: folderId || null,
           star_rating: 0,
           status: 1,
+          is_published: false,
           updated_at: new Date().toISOString(),
         }]);
 
@@ -160,10 +182,10 @@ export async function POST(req: Request) {
     const uploadKind = detectUploadKind(file);
     const originalBuffer = Buffer.from(await file.arrayBuffer());
     const originalBranchType = uploadKind === 'raw' ? BRANCH_TYPE_RAW : BRANCH_TYPE_ORIGINAL;
-    const originalLocalPath = await saveLocalOriginal({
+    const originalLocalPath = await saveLocalAsset({
       projectId: targetProjectId,
       photoId: targetPhotoId,
-      branchType: originalBranchType,
+      branchDir: originalBranchType === BRANCH_TYPE_RAW ? 'raw' : 'original',
       fileName: file.name,
       buffer: originalBuffer,
     });
@@ -221,10 +243,11 @@ export async function POST(req: Request) {
 
     if (uploadKind === 'image') {
       const thumbBuffer = await buildThumb(originalBuffer);
-      const displayBuffer = await buildDisplay(originalBuffer);
+      const displayBuffer = await buildDisplay(originalBuffer, displayPreset);
       const thumbMeta = await getImageMetadata(thumbBuffer);
       const displayMeta = await getImageMetadata(displayBuffer);
       const safeName = sanitizeFileName(file.name.replace(/\.[^.]+$/, ''));
+      const displayFileName = `${safeName}.jpg`;
       const baseKey = `${targetProjectId}/${targetPhotoId}`;
       const thumbKey = `${baseKey}/thumb/${safeName}.jpg`;
       const displayKey = `${baseKey}/display/${safeName}.jpg`;
@@ -240,6 +263,16 @@ export async function POST(req: Request) {
         body: displayBuffer,
         contentType: 'image/jpeg',
       });
+
+      if (displayPreset === 'original') {
+        await saveLocalAsset({
+          projectId: targetProjectId,
+          photoId: targetPhotoId,
+          branchDir: 'display',
+          fileName: displayFileName,
+          buffer: displayBuffer,
+        });
+      }
 
       const { data: thumbRow, error: thumbError } = await supabase
         .from('photo_files')
@@ -259,7 +292,7 @@ export async function POST(req: Request) {
           height: thumbMeta.height,
           checksum_sha256: sha256(thumbBuffer),
           exif: thumbMeta.exif,
-          processing_meta: { derived_from: 'original' },
+          processing_meta: { derived_from: 'original', preset: 'thumb-400px-100kb' },
           created_by: null,
         }])
         .select('id')
@@ -277,7 +310,7 @@ export async function POST(req: Request) {
           branch_type: BRANCH_TYPE_DISPLAY,
           version_no: 1,
           variant_type: 1,
-          file_name: `${safeName}.jpg`,
+          file_name: displayFileName,
           original_file_name: file.name,
           storage_provider: 'r2',
           bucket_name: process.env.R2_BUCKET_NAME!,
@@ -288,7 +321,7 @@ export async function POST(req: Request) {
           height: displayMeta.height,
           checksum_sha256: sha256(displayBuffer),
           exif: displayMeta.exif,
-          processing_meta: { derived_from: 'original' },
+          processing_meta: { derived_from: 'original', preset: displayPreset },
           created_by: null,
         }])
         .select('id')
