@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { createPortal } from "react-dom";
 import { X, ChevronLeft, ChevronRight, Download, Heart, Trash2, Info, Loader2 } from "lucide-react";
 import type { Photo } from "@/data/mockData";
 import { Button } from "@/components/ui/button";
@@ -56,7 +57,13 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurren
     return () => window.removeEventListener("keydown", handler);
   }, [open, onClose, prev, next]);
 
-  if (!open || photos.length === 0) return null;
+  const [portalReady, setPortalReady] = useState(false)
+
+  useEffect(() => {
+    setPortalReady(true)
+  }, [])
+
+  if (!open || photos.length === 0 || !portalReady) return null;
 
   const photo = photos[index] as Photo & {
     displayUrl?: string;
@@ -118,9 +125,9 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurren
     }
   };
 
-  return (
+  return createPortal(
     <div
-      className="fixed inset-x-0 bottom-0 top-[calc(env(safe-area-inset-top)*-1)] z-[100] flex min-h-[calc(100dvh+env(safe-area-inset-top))] items-center justify-center overflow-hidden bg-black/80 backdrop-blur-md"
+      className="fixed inset-0 z-[1000] flex min-h-[100dvh] items-center justify-center overflow-hidden bg-black/80 backdrop-blur-md"
       style={{ paddingTop: 'env(safe-area-inset-top)' }}
       onClick={onClose}
     >
@@ -336,7 +343,8 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurren
           </div>
         </div>
       )}
-    </div>
+    </div>,
+    document.body
   );
 };
 
