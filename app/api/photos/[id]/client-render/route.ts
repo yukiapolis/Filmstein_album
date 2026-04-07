@@ -82,7 +82,11 @@ async function buildClientImage(request: NextRequest, context: RouteContext, hea
     const latestVersion = getLatestVersionFiles((fileRows ?? []) as PhotoFileRow[])
     const targetFile = mode === 'download'
       ? latestVersion?.byBranch.original ?? latestVersion?.byBranch.display ?? null
-      : latestVersion?.byBranch.display ?? latestVersion?.byBranch.original ?? null
+      : latestVersion?.byBranch.display ?? null
+
+    if (mode === 'preview' && !targetFile) {
+      return Response.json({ error: 'No display preview file found' }, { status: 404 })
+    }
 
     if (!targetFile) return Response.json({ error: 'No file found' }, { status: 404 })
 

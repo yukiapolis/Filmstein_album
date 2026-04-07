@@ -88,7 +88,7 @@ const PhotoCard = ({
         )}
         onClick={onClick}
       >
-        <div className="overflow-hidden">
+        <div className={cn("overflow-hidden", forceSquare ? "aspect-square" : "") }>
           <img
             src={imageSrc}
             alt={photo.fileName}
