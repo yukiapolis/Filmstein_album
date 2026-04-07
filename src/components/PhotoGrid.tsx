@@ -62,27 +62,23 @@ const PhotoGrid = ({
               <div
                 key={photo.id}
                 className={`flex items-center gap-3 rounded-lg border px-3 py-2 text-left transition-colors ${
-                  selectionActive ? "cursor-default" : "cursor-pointer hover:bg-accent/50"
-                } ${
-                  isPhotoSelected(photo.id) ? "border-sky-400 bg-sky-50/50" : "border-border bg-card"
+                  isPhotoSelected(photo.id) ? "border-sky-400 bg-sky-50/50" : "border-border bg-card hover:bg-accent/50"
                 }`}
-                onClick={() => {
-                  if (selectionActive) {
-                    onToggleSelect?.(photo.id, !isPhotoSelected(photo.id));
-                  }
-                }}
-                onDoubleClick={() => {
-                  setPreviewIndex(i)
-                }}
+                onClick={() => setPreviewIndex(i)}
               >
                 {selectionActive && (
-                  <div
-                    className={`flex h-5 w-5 shrink-0 items-center justify-center rounded border-2 ${
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onToggleSelect?.(photo.id, !isPhotoSelected(photo.id));
+                    }}
+                    className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 transition-all ${
                       isPhotoSelected(photo.id) ? "border-sky-600 bg-sky-600" : "border-muted-foreground"
                     }`}
                   >
                     {isPhotoSelected(photo.id) && <span className="text-xs text-white">✓</span>}
-                  </div>
+                  </button>
                 )}
                 <img src={listThumbSrc} alt={photo.fileName} className="h-10 w-10 shrink-0 rounded object-cover" />
                 <div className="min-w-0 flex-1">
@@ -95,7 +91,7 @@ const PhotoGrid = ({
           })}
         </div>
         {isEmpty && <EmptyPhotosState title="No photos in this album" description="Upload photos to see them here." />}
-        {previewIndex !== null && !selectionActive && (
+        {previewIndex !== null && (
           <PhotoPreviewModal
             photos={photos}
             initialIndex={previewIndex}
@@ -123,12 +119,7 @@ const PhotoGrid = ({
             <PhotoCard
               photo={photo}
               variant={cardVariant}
-              onClick={() => {
-                if (selectionActive) {
-                  onToggleSelect?.(photo.id, !isPhotoSelected(photo.id))
-                }
-              }}
-              onDoubleClick={() => setPreviewIndex(i)}
+              onClick={() => setPreviewIndex(i)}
               selected={selectionActive ? isPhotoSelected(photo.id) : undefined}
               selectionMode={selectionMode}
               onSelect={selectionActive ? (s) => onToggleSelect?.(photo.id, s) : undefined}
@@ -142,7 +133,7 @@ const PhotoGrid = ({
         ))}
       </div>
       {isEmpty && <EmptyPhotosState title="No photos yet" description="Upload photos to get started." />}
-      {previewIndex !== null && !selectionActive && (
+      {previewIndex !== null && (
         <PhotoPreviewModal
           photos={photos}
           initialIndex={previewIndex}
