@@ -9,8 +9,10 @@ export interface Project {
   name: string;
   type: ProjectType;
   date: string;
+  created_at?: string;
   cover_url: string;
   photoCount: number;
+  storage_used_bytes?: number;
   status: ProjectStatus;
   clientName: string;
   description: string;

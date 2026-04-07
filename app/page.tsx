@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { Plus } from "lucide-react";
 
 import Navbar from "@/components/Navbar";
@@ -13,6 +13,7 @@ import { mapRowToProject } from "@/lib/mapProject";
 
 export default function Home() {
   const [projects, setProjects] = useState<Project[]>([]);
+  const [searchQuery, setSearchQuery] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
 
   const refreshProjects = useCallback(async () => {
@@ -29,6 +30,16 @@ export default function Home() {
     refreshProjects();
   }, [refreshProjects]);
 
+  const filteredProjects = useMemo(() => {
+    const keyword = searchQuery.trim().toLowerCase();
+    if (!keyword) return projects;
+    return projects.filter((project) =>
+      [project.name, project.clientName, project.description, project.status, project.type]
+        .filter(Boolean)
+        .some((value) => value.toLowerCase().includes(keyword))
+    );
+  }, [projects, searchQuery]);
+
   return (
     <div className="min-h-screen bg-surface">
       <Navbar />
@@ -36,7 +47,7 @@ export default function Home() {
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h1 className="text-2xl font-bold text-foreground">Projects</h1>
-            <p className="text-sm text-muted-foreground mt-1">{projects.length} projects</p>
+            <p className="text-sm text-muted-foreground mt-1">{filteredProjects.length} projects</p>
           </div>
           <Button onClick={() => setDialogOpen(true)}>
             <Plus className="mr-2 h-4 w-4" />
@@ -44,9 +55,9 @@ export default function Home() {
           </Button>
         </div>
         <div className="max-w-sm">
-          <SearchBar />
+          <SearchBar value={searchQuery} onChange={setSearchQuery} />
         </div>
-        <ProjectGrid projects={projects} />
+        <ProjectGrid projects={filteredProjects} />
       </main>
 
       <CreateProjectDialog
