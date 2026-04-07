@@ -119,7 +119,11 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurren
   };
 
   return (
-    <div className="fixed inset-0 z-[100] flex min-h-[100dvh] items-center justify-center overflow-hidden bg-black/80 backdrop-blur-md" onClick={onClose}>
+    <div
+      className="fixed inset-x-0 bottom-0 top-[calc(env(safe-area-inset-top)*-1)] z-[100] flex min-h-[calc(100dvh+env(safe-area-inset-top))] items-center justify-center overflow-hidden bg-black/80 backdrop-blur-md"
+      style={{ paddingTop: 'env(safe-area-inset-top)' }}
+      onClick={onClose}
+    >
       <div className="absolute left-4 top-4 z-10 flex items-center gap-2">
         {photo.isPublished === false && (
           <span className="inline-flex items-center rounded-md bg-black/70 px-2 py-0.5 text-[10px] font-semibold text-white shadow-sm">
