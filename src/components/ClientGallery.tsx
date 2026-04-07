@@ -113,6 +113,7 @@ const ClientGallery = ({
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
   const [galleryMode, setGalleryMode] = useState<ClientGalleryMode>('grid')
   const [splashVisible, setSplashVisible] = useState(false)
+  const [splashCountdown, setSplashCountdown] = useState(0)
 
   useEffect(() => {
     if (!id) return;
@@ -139,11 +140,17 @@ const ClientGallery = ({
 
             const splashUrl = nextProject?.project_assets?.splash_poster?.url
             if (splashUrl) {
-              setSplashVisible(true)
               const durationSeconds = Math.max(1, Number(nextProject.project_assets?.splash_poster?.duration_seconds ?? 3))
-              window.setTimeout(() => {
+              setSplashCountdown(durationSeconds)
+              setSplashVisible(true)
+              const timeoutId = window.setTimeout(() => {
                 setSplashVisible(false)
               }, durationSeconds * 1000)
+              const intervalId = window.setInterval(() => {
+                setSplashCountdown((prev) => Math.max(0, prev - 1))
+              }, 1000)
+              window.setTimeout(() => window.clearInterval(intervalId), durationSeconds * 1000)
+              void timeoutId
             }
           } else {
             setError("Could not load photos.");
@@ -279,8 +286,18 @@ const ClientGallery = ({
       <div className="min-h-screen bg-gradient-to-b from-background via-surface to-background">
         {splashVisible && project?.project_assets?.splash_poster?.url ? (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black">
-            <img src={project.project_assets.splash_poster.url} alt={projectName} className="h-full w-full object-cover" />
+            <img src={project.project_assets.splash_poster.url} alt={projectName} className="h-full w-full object-contain" />
             <div className="absolute inset-0 bg-black/25" />
+            <div className="absolute right-4 top-4 flex items-center gap-2">
+              <span className="rounded-full bg-black/45 px-3 py-1 text-sm text-white">{splashCountdown}s</span>
+              <button
+                type="button"
+                onClick={() => setSplashVisible(false)}
+                className="rounded-full bg-white/90 px-3 py-1 text-sm font-medium text-foreground"
+              >
+                跳过
+              </button>
+            </div>
             <div className="absolute inset-x-0 bottom-10 px-6 text-center text-white">
               <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">{projectName}</h1>
             </div>
@@ -293,7 +310,7 @@ const ClientGallery = ({
           </div>
         ) : null}
 
-        <main className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 sm:py-8 lg:px-8 lg:py-10">
+        <main className="mx-auto w-full max-w-7xl px-0 py-4 sm:px-4 sm:py-6 lg:px-8 lg:py-10">
           {loading ? (
             <p className="py-12 text-center text-sm text-muted-foreground">Loading photos…</p>
           ) : error ? (
@@ -301,7 +318,7 @@ const ClientGallery = ({
           ) : (
             <div className="space-y-4 sm:space-y-5">
               <section>
-                <div className="overflow-hidden rounded-2xl bg-muted shadow-sm">
+                <div className="overflow-hidden bg-muted shadow-sm sm:rounded-2xl">
                   <div className="aspect-[16/10] sm:aspect-[16/7] lg:aspect-[16/5]">
                     <img src={heroImage} alt={projectName} className="h-full w-full object-cover" />
                   </div>
@@ -309,7 +326,7 @@ const ClientGallery = ({
               </section>
 
               <section>
-                <div className="rounded-2xl border border-border bg-card p-4 shadow-sm sm:p-5 lg:p-6">
+                <div className="border-y border-border bg-card p-4 shadow-sm sm:rounded-2xl sm:border sm:p-5 lg:p-6">
                   <div className="space-y-3">
                     <h1 className="text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">{projectName}</h1>
                     {projectDescription ? <p className="max-w-3xl text-sm leading-6 text-muted-foreground sm:text-base">{projectDescription}</p> : null}
@@ -328,7 +345,7 @@ const ClientGallery = ({
                       >
                         All Photos
                       </button>
-                      {albumsForUi.map((album) => (
+                      {albumsForUi.filter((album) => album.id !== 'all').map((album) => (
                         <button
                           key={album.id}
                           type="button"
