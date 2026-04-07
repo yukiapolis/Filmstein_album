@@ -26,12 +26,15 @@ export async function GET() {
 
       const { data: photoRows, error: photoError } = await supabase
         .from('photos')
-        .select('global_photo_id')
+        .select('global_photo_id, project_id')
         .eq('project_id', projectId)
 
       if (photoError) throw new Error(photoError.message)
 
-      const photoIds = (photoRows ?? []).map((photo) => String(photo.global_photo_id ?? '')).filter(Boolean)
+      const photoIds = (photoRows ?? [])
+        .filter((photo) => String(photo.project_id ?? '') === projectId)
+        .map((photo) => String(photo.global_photo_id ?? ''))
+        .filter(Boolean)
 
       let fileRows: Array<{ file_size_bytes?: unknown }> = []
       if (photoIds.length > 0) {

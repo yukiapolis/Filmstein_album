@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Calendar, ChevronRight, FolderOpen, HardDrive, Image as ImageIcon, ServerCog } from "lucide-react";
+import { Calendar, FolderOpen, HardDrive, Image as ImageIcon, ServerCog } from "lucide-react";
 import type { Project } from "@/data/mockData";
 import StatusBadge from "@/components/StatusBadge";
 import { Button } from "@/components/ui/button";
@@ -30,7 +30,7 @@ function FtpBadge({ enabled }: { enabled: boolean }) {
   return (
     <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium ${enabled ? 'bg-emerald-50 text-emerald-700' : 'bg-muted text-muted-foreground'}`}>
       <span className={`h-1.5 w-1.5 rounded-full ${enabled ? 'bg-emerald-500' : 'bg-muted-foreground/60'}`} />
-      {enabled ? 'Enabled' : 'Disabled'}
+      {enabled ? 'On' : 'Off'}
     </span>
   )
 }
@@ -39,10 +39,7 @@ export default function ProjectListRow({ project }: { project: Project }) {
   const ftpEnabled = Boolean(project.ftp_ingest?.enabled)
 
   return (
-    <Link
-      href={`/projects/${project.id}`}
-      className="group block rounded-xl border border-border bg-card transition-colors hover:border-primary/30 hover:bg-accent/20"
-    >
+    <div className="rounded-xl border border-border bg-card transition-colors hover:border-primary/20">
       <div className="flex flex-col gap-4 p-4 lg:flex-row lg:items-center lg:gap-6">
         <div className="flex min-w-0 flex-1 items-center gap-4">
           <div className="overflow-hidden rounded-lg border border-border bg-muted">
@@ -67,7 +64,7 @@ export default function ProjectListRow({ project }: { project: Project }) {
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:w-auto lg:min-w-[520px] lg:flex-none">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:min-w-[420px] lg:flex-none">
           <div className="rounded-lg bg-muted/40 px-3 py-2">
             <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Photos</p>
             <p className="mt-1 inline-flex items-center gap-1 text-sm font-medium text-foreground">
@@ -91,17 +88,17 @@ export default function ProjectListRow({ project }: { project: Project }) {
               <FtpBadge enabled={ftpEnabled} />
             </div>
           </div>
+        </div>
 
-          <div className="flex items-center justify-end gap-2 lg:justify-start">
-            <Button type="button" variant="outline" size="sm" asChild onClick={(e) => e.stopPropagation()}>
-              <Link href={`/projects/${project.id}/preview`}>View</Link>
-            </Button>
-            <div className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-muted text-muted-foreground transition-colors group-hover:bg-primary group-hover:text-primary-foreground">
-              <ChevronRight className="h-4 w-4" />
-            </div>
-          </div>
+        <div className="flex items-center justify-end gap-2 lg:min-w-[160px] lg:flex-none">
+          <Button type="button" variant="outline" size="sm" asChild>
+            <Link href={`/projects/${project.id}`}>Manage</Link>
+          </Button>
+          <Button type="button" variant="outline" size="sm" asChild>
+            <Link href={`/projects/${project.id}/preview`}>View</Link>
+          </Button>
         </div>
       </div>
-    </Link>
+    </div>
   )
 }
