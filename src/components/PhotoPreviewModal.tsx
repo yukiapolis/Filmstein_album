@@ -63,8 +63,6 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurren
     setPortalReady(true)
   }, [])
 
-  if (!open || photos.length === 0 || !portalReady) return null;
-
   const photo = photos[index] as Photo & {
     displayUrl?: string;
     originalUrl?: string;
@@ -77,19 +75,26 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurren
   const watermarkConfig = getClientWatermarkConfig(project)
 
   useEffect(() => {
+    if (!open || photos.length === 0) return
     setImageLoading(true)
     setHighResRequested(false)
     setHighResLoaded(false)
     setHighResFailed(false)
-  }, [index, open])
+  }, [index, open, photos.length])
 
-  const previewSrc = clientDownloadMode
-    ? `/api/photos/${photo.id}/client-render?mode=preview&ts=${photo.id}-${index}`
-    : (photo.displayUrl || photo.file_url || photo.url)
+  const previewSrc = photo
+    ? (clientDownloadMode
+      ? `/api/photos/${photo.id}/client-render?mode=preview&ts=${photo.id}-${index}`
+      : (photo.displayUrl || photo.file_url || photo.url))
+    : ''
 
-  const highResSrc = clientDownloadMode
-    ? `/api/photos/${photo.id}/client-render?mode=download&ts=${photo.id}-${index}-hires`
-    : (photo.originalUrl || photo.retouchedOriginalUrl || photo.displayUrl || photo.file_url || photo.url)
+  const highResSrc = photo
+    ? (clientDownloadMode
+      ? `/api/photos/${photo.id}/client-render?mode=download&ts=${photo.id}-${index}-hires`
+      : (photo.originalUrl || photo.retouchedOriginalUrl || photo.displayUrl || photo.file_url || photo.url))
+    : ''
+
+  if (!open || photos.length === 0 || !portalReady || !photo) return null;
 
   const openDownload = async (variant: "current" | "retouched-original" | "original" | "client-display" | "client-original") => {
     const url = clientDownloadMode
