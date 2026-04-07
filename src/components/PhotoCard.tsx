@@ -144,11 +144,12 @@ const PhotoCard = ({
   return (
     <div
       className={cn(
-        "overflow-visible rounded-xl border border-border bg-card shadow-sm transition-all",
+        "overflow-visible border border-border bg-card shadow-sm transition-all",
+        forceSquare ? "rounded-none" : "rounded-xl",
         selected ? "ring-2 ring-sky-500/70 shadow-md" : "hover:shadow-md",
       )}
     >
-      <div className={cn("group relative cursor-pointer overflow-hidden rounded-t-xl bg-muted", forceSquare ? "aspect-square" : "aspect-[4/3]")} onClick={onClick}>
+      <div className={cn("group relative cursor-pointer overflow-hidden bg-muted", forceSquare ? "aspect-square" : "aspect-[4/3] rounded-t-xl")} onClick={onClick}>
         <img
           src={imageSrc}
           alt={photo.fileName}
@@ -211,7 +212,7 @@ const PhotoCard = ({
         )}
       </div>
 
-      <div className="flex items-start justify-between gap-2 border-t border-border/60 px-3 py-2.5">
+      <div className={cn("flex items-start justify-between gap-2 border-t border-border/60 px-3 py-2.5", forceSquare ? "rounded-none" : "") }>
         <div className="min-w-0 flex-1">
           <p
             className={cn(

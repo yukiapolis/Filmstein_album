@@ -11,6 +11,8 @@ import {
   LayoutGrid,
   List,
   RefreshCw,
+  Columns2,
+  Rows3,
 } from "lucide-react";
 import type { Photo, Project } from "@/data/mockData";
 import PhotoGrid, { type ViewMode } from "@/components/PhotoGrid";
@@ -28,6 +30,50 @@ const EmptyState = ({ message }: { message?: string }) => (
     <p className="text-sm text-muted-foreground">{message ?? "No photos yet."}</p>
   </div>
 );
+
+type ClientGalleryMode = 'grid' | 'masonry' | 'timeline'
+
+type TimelineGroup = {
+  key: string
+  label: string
+  photos: Photo[]
+}
+
+function formatTimelineLabel(value: string) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value || 'Unknown date'
+  return new Intl.DateTimeFormat('en-CA', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  }).format(date)
+}
+
+function groupPhotosForTimeline(photos: Photo[], sortDir: 'asc' | 'desc') {
+  const groups = new Map<string, Photo[]>()
+  for (const photo of photos) {
+    const key = (photo.uploadedAt || '').slice(0, 10) || 'Unknown date'
+    const list = groups.get(key) ?? []
+    list.push(photo)
+    groups.set(key, list)
+  }
+
+  const entries = Array.from(groups.entries()).map(([key, items]) => ({
+    key,
+    label: formatTimelineLabel(key),
+    photos: [...items].sort((a, b) => {
+      const ta = new Date(a.uploadedAt || 0).getTime()
+      const tb = new Date(b.uploadedAt || 0).getTime()
+      return sortDir === 'asc' ? ta - tb : tb - ta
+    }),
+  }))
+
+  return entries.sort((a, b) => {
+    const ta = new Date(a.key || 0).getTime()
+    const tb = new Date(b.key || 0).getTime()
+    return sortDir === 'asc' ? ta - tb : tb - ta
+  })
+}
 
 const ClientGallery = ({
   photos: externalPhotos,
@@ -53,6 +99,8 @@ const ClientGallery = ({
   const [sortKey, setSortKey] = useState<"date" | "name">("date");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
+  const [galleryMode, setGalleryMode] = useState<ClientGalleryMode>('grid')
+  const [splashVisible, setSplashVisible] = useState(false)
 
   useEffect(() => {
     if (!id) return;
@@ -73,8 +121,18 @@ const ClientGallery = ({
         if (!cancelled) {
           if (projRes.ok && projBody.success === true) {
             const fetched = (projBody.data?.photos ?? []) as Photo[];
+            const nextProject = (projBody.data?.project as Project) ?? null
             setPhotos(fetched);
-            setProject((projBody.data?.project as Project) ?? null);
+            setProject(nextProject);
+
+            const splashUrl = nextProject?.project_assets?.splash_poster?.url
+            if (splashUrl) {
+              setSplashVisible(true)
+              const durationSeconds = Math.max(1, Number(nextProject.project_assets?.splash_poster?.duration_seconds ?? 3))
+              window.setTimeout(() => {
+                setSplashVisible(false)
+              }, durationSeconds * 1000)
+            }
           } else {
             setError("Could not load photos.");
             return;
@@ -99,6 +157,7 @@ const ClientGallery = ({
   const projectName = project?.name ?? (id ? `Project ${id}` : "Project");
   const projectDescription = project?.description?.trim() || "";
   const heroImage = getClientHeroImage(project);
+  const loadingGif = project?.project_assets?.loading_gif?.url
 
   const albumsForUi = useMemo(
     () => buildAlbumsFromPhotos(photos, folders),
@@ -154,6 +213,8 @@ const ClientGallery = ({
       return mul * (ta - tb);
     });
   }, [folderFiltered, activeTag, searchQuery, sortKey, sortDir]);
+
+  const timelineGroups = useMemo<TimelineGroup[]>(() => groupPhotosForTimeline(filtered, sortDir), [filtered, sortDir])
 
   const toggleSelect = (photoId: string, selected: boolean) => {
     setSelections((prev) => {
@@ -247,7 +308,23 @@ const ClientGallery = ({
   if (cleanPreview) {
     return (
       <div className="min-h-screen bg-gradient-to-b from-background via-surface to-background">
-        <main className="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 sm:py-10 lg:px-8 lg:py-12">
+        {splashVisible && project?.project_assets?.splash_poster?.url ? (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black">
+            <img src={project.project_assets.splash_poster.url} alt={projectName} className="h-full w-full object-cover" />
+            <div className="absolute inset-0 bg-black/25" />
+            <div className="absolute inset-x-0 bottom-10 px-6 text-center text-white">
+              <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">{projectName}</h1>
+            </div>
+          </div>
+        ) : null}
+
+        {loading && loadingGif ? (
+          <div className="fixed inset-0 z-40 flex items-center justify-center bg-background/95 backdrop-blur-sm">
+            <img src={loadingGif} alt="Loading" className="h-28 w-28 object-contain sm:h-36 sm:w-36" />
+          </div>
+        ) : null}
+
+        <main className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 sm:py-8 lg:px-8 lg:py-10">
           {loading ? (
             <p className="py-12 text-center text-sm text-muted-foreground">Loading photos…</p>
           ) : error ? (
@@ -257,44 +334,104 @@ const ClientGallery = ({
           ) : filtered.length === 0 ? (
             <EmptyState message="No published photos yet." />
           ) : (
-            <div className="space-y-6 sm:space-y-8">
-              <section className="space-y-5 px-1 pt-2 sm:px-2">
-                <div className="relative overflow-hidden rounded-3xl bg-muted shadow-sm">
+            <div className="space-y-5 sm:space-y-6">
+              <section className="space-y-4">
+                <div className="overflow-hidden rounded-2xl bg-muted shadow-sm">
                   <div className="aspect-[16/10] sm:aspect-[16/7] lg:aspect-[16/5]">
-                    <img
-                      src={heroImage}
-                      alt={projectName}
-                      className="h-full w-full object-cover"
-                    />
+                    <img src={heroImage} alt={projectName} className="h-full w-full object-cover" />
                   </div>
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/35 via-black/10 to-transparent" />
                 </div>
               </section>
 
-              <section className="mx-auto w-full max-w-5xl px-1 sm:px-2">
-                <div className="rounded-2xl border border-border bg-card p-5 shadow-sm sm:p-6">
-                  <h1 className="text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">{projectName}</h1>
-                  {projectDescription ? (
-                    <p className="mt-3 max-w-3xl text-sm leading-6 text-muted-foreground sm:text-base">
-                      {projectDescription}
-                    </p>
-                  ) : null}
+              <section>
+                <div className="rounded-2xl border border-border bg-card p-4 shadow-sm sm:p-5 lg:p-6">
+                  <div className="space-y-3">
+                    <h1 className="text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">{projectName}</h1>
+                    {projectDescription ? (
+                      <p className="max-w-3xl text-sm leading-6 text-muted-foreground sm:text-base">
+                        {projectDescription}
+                      </p>
+                    ) : null}
+                  </div>
                 </div>
               </section>
 
-              <section className="mx-auto w-full max-w-7xl">
-                <PhotoGrid
-                  photos={filtered}
-                  viewMode="grid"
-                  selectedIds={[]}
-                  cardVariant="gallery"
-                  hideStatusBadge
-                  hideMetaOverlay
-                  clientDownloadMode
-                  forceSquareCards
-                  project={project}
-                  gridClassName="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 lg:gap-4 xl:grid-cols-5 2xl:grid-cols-6"
-                />
+              <section className="space-y-4">
+                <div className="rounded-2xl border border-border bg-card p-3 shadow-sm sm:p-4">
+                  <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setGalleryMode('grid')}
+                        className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors ${galleryMode === 'grid' ? 'bg-primary text-primary-foreground' : 'bg-muted text-foreground hover:bg-accent'}`}
+                      >
+                        <LayoutGrid className="h-4 w-4" />
+                        Grid
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setGalleryMode('masonry')}
+                        className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors ${galleryMode === 'masonry' ? 'bg-primary text-primary-foreground' : 'bg-muted text-foreground hover:bg-accent'}`}
+                      >
+                        <Columns2 className="h-4 w-4" />
+                        Masonry
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setGalleryMode('timeline')}
+                        className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors ${galleryMode === 'timeline' ? 'bg-primary text-primary-foreground' : 'bg-muted text-foreground hover:bg-accent'}`}
+                      >
+                        <Rows3 className="h-4 w-4" />
+                        Timeline
+                      </button>
+                    </div>
+                    <div className="flex items-center gap-2 self-start md:self-auto">
+                      <Button type="button" variant="outline" size="sm" onClick={cycleSort}>
+                        <ArrowUpDown className="mr-1.5 h-3.5 w-3.5" />
+                        {sortDir === 'desc' ? 'Newest first' : 'Oldest first'}
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+
+                {galleryMode === 'timeline' ? (
+                  <div className="space-y-8">
+                    {timelineGroups.map((group) => (
+                      <section key={group.key} className="space-y-3">
+                        <div className="sticky top-2 z-10 inline-flex rounded-full bg-card px-3 py-1 text-sm font-medium text-foreground shadow-sm ring-1 ring-border">
+                          {group.label}
+                        </div>
+                        <PhotoGrid
+                          photos={group.photos}
+                          viewMode="grid"
+                          selectedIds={[]}
+                          cardVariant="gallery"
+                          hideStatusBadge
+                          hideMetaOverlay
+                          clientDownloadMode
+                          forceSquareCards
+                          project={project}
+                          gridClassName="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 lg:gap-4 xl:grid-cols-5"
+                        />
+                      </section>
+                    ))}
+                  </div>
+                ) : (
+                  <PhotoGrid
+                    photos={filtered}
+                    viewMode="grid"
+                    selectedIds={[]}
+                    cardVariant="gallery"
+                    hideStatusBadge
+                    hideMetaOverlay
+                    clientDownloadMode
+                    forceSquareCards={galleryMode === 'grid'}
+                    project={project}
+                    gridClassName={galleryMode === 'masonry'
+                      ? 'columns-2 gap-3 space-y-3 sm:columns-3 lg:columns-4 xl:columns-5'
+                      : 'grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 lg:gap-4 xl:grid-cols-5 2xl:grid-cols-6'}
+                  />
+                )}
               </section>
             </div>
           )}
