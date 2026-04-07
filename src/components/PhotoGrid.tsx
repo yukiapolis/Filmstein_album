@@ -69,9 +69,10 @@ const PhotoGrid = ({
                 onClick={() => {
                   if (selectionActive) {
                     onToggleSelect?.(photo.id, !isPhotoSelected(photo.id));
-                  } else {
-                    setPreviewIndex(i);
                   }
+                }}
+                onDoubleClick={() => {
+                  setPreviewIndex(i)
                 }}
               >
                 {selectionActive && (
@@ -122,7 +123,12 @@ const PhotoGrid = ({
             <PhotoCard
               photo={photo}
               variant={cardVariant}
-              onClick={() => setPreviewIndex(i)}
+              onClick={() => {
+                if (selectionActive) {
+                  onToggleSelect?.(photo.id, !isPhotoSelected(photo.id))
+                }
+              }}
+              onDoubleClick={() => setPreviewIndex(i)}
               selected={selectionActive ? isPhotoSelected(photo.id) : undefined}
               selectionMode={selectionMode}
               onSelect={selectionActive ? (s) => onToggleSelect?.(photo.id, s) : undefined}

@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 interface PhotoCardProps {
   photo: Photo;
   onClick?: () => void;
+  onDoubleClick?: () => void;
   selected?: boolean;
   onSelect?: (selected: boolean) => void;
   selectionMode?: boolean;
@@ -23,6 +24,7 @@ interface PhotoCardProps {
 const PhotoCard = ({
   photo,
   onClick,
+  onDoubleClick,
   selected,
   onSelect,
   selectionMode = false,
@@ -84,6 +86,10 @@ const PhotoCard = ({
       <div
         className="group relative cursor-pointer overflow-hidden rounded-2xl bg-muted/70 shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md"
         onClick={onClick}
+        onDoubleClick={(e) => {
+          e.stopPropagation();
+          onDoubleClick?.();
+        }}
       >
         <div className="overflow-hidden">
           <img
@@ -149,7 +155,14 @@ const PhotoCard = ({
         selected ? "ring-2 ring-sky-500/70 shadow-md" : "hover:shadow-md",
       )}
     >
-      <div className={cn("group relative cursor-pointer overflow-hidden bg-muted", forceSquare ? "aspect-square" : "aspect-[4/3] rounded-t-xl")} onClick={onClick}>
+      <div
+        className={cn("group relative cursor-pointer overflow-hidden bg-muted", forceSquare ? "aspect-square" : "aspect-[4/3] rounded-t-xl")}
+        onClick={onClick}
+        onDoubleClick={(e) => {
+          e.stopPropagation();
+          onDoubleClick?.();
+        }}
+      >
         <img
           src={imageSrc}
           alt={photo.fileName}
