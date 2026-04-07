@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { createPortal } from "react-dom";
 import { X, ChevronLeft, ChevronRight, Download, Heart, Trash2, Info, Loader2 } from "lucide-react";
 import type { Photo } from "@/data/mockData";
 import { Button } from "@/components/ui/button";
@@ -30,6 +31,18 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurren
   const [highResLoaded, setHighResLoaded] = useState(false);
   const [highResFailed, setHighResFailed] = useState(false);
 
+  useEffect(() => {
+    if (!open) return
+    const previousOverflow = document.body.style.overflow
+    const previousOverscroll = document.body.style.overscrollBehavior
+    document.body.style.overflow = 'hidden'
+    document.body.style.overscrollBehavior = 'none'
+    return () => {
+      document.body.style.overflow = previousOverflow
+      document.body.style.overscrollBehavior = previousOverscroll
+    }
+  }, [open])
+
   const prev = useCallback(() => setIndex((i) => (i > 0 ? i - 1 : photos.length - 1)), [photos.length]);
   const next = useCallback(() => setIndex((i) => (i < photos.length - 1 ? i + 1 : 0)), [photos.length]);
 
@@ -44,7 +57,11 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurren
     return () => window.removeEventListener("keydown", handler);
   }, [open, onClose, prev, next]);
 
-  if (!open || photos.length === 0) return null;
+  const [portalReady, setPortalReady] = useState(false)
+
+  useEffect(() => {
+    setPortalReady(true)
+  }, [])
 
   const photo = photos[index] as Photo & {
     displayUrl?: string;
@@ -58,11 +75,26 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurren
   const watermarkConfig = getClientWatermarkConfig(project)
 
   useEffect(() => {
+    if (!open || photos.length === 0) return
     setImageLoading(true)
     setHighResRequested(false)
     setHighResLoaded(false)
     setHighResFailed(false)
-  }, [index, open])
+  }, [index, open, photos.length])
+
+  const previewSrc = photo
+    ? (clientDownloadMode
+      ? `/api/photos/${photo.id}/client-render?mode=preview&ts=${photo.id}-${index}`
+      : (photo.displayUrl || photo.file_url || photo.url))
+    : ''
+
+  const highResSrc = photo
+    ? (clientDownloadMode
+      ? `/api/photos/${photo.id}/client-render?mode=download&ts=${photo.id}-${index}-hires`
+      : (photo.originalUrl || photo.retouchedOriginalUrl || photo.displayUrl || photo.file_url || photo.url))
+    : ''
+
+  if (!open || photos.length === 0 || !portalReady || !photo) return null;
 
   const openDownload = async (variant: "current" | "retouched-original" | "original" | "client-display" | "client-original") => {
     const url = clientDownloadMode
@@ -98,12 +130,13 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurren
     }
   };
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90" onClick={onClose}>
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[1000] flex min-h-[100dvh] items-center justify-center overflow-hidden bg-black/80 backdrop-blur-md"
+      style={{ paddingTop: 'env(safe-area-inset-top)' }}
+      onClick={onClose}
+    >
       <div className="absolute left-4 top-4 z-10 flex items-center gap-2">
-        <span className="inline-flex items-center rounded-md border border-border/80 bg-white/95 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground shadow-sm">
-          {(photo.versionCount || 1) > 1 ? 'retouched' : 'original'}
-        </span>
         {photo.isPublished === false && (
           <span className="inline-flex items-center rounded-md bg-black/70 px-2 py-0.5 text-[10px] font-semibold text-white shadow-sm">
             未发布
@@ -217,7 +250,7 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurren
         <ChevronLeft className="h-6 w-6" />
       </button>
 
-      <div className="max-h-[85vh] w-[min(92vw,1200px)]" onClick={(e) => e.stopPropagation()}>
+      <div className="max-h-[85dvh] w-[min(92vw,1200px)] transform-gpu" onClick={(e) => e.stopPropagation()}>
         <div className="relative flex max-h-[85vh] items-center justify-center overflow-hidden rounded-xl bg-black/40">
           {imageLoading && (
             <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/35 backdrop-blur-sm">
@@ -228,9 +261,7 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurren
             </div>
           )}
           <img
-            src={clientDownloadMode
-              ? `/api/photos/${photo.id}/client-render?mode=${highResRequested ? 'download' : 'preview'}`
-              : (highResRequested ? (photo.originalUrl || photo.retouchedOriginalUrl || photo.displayUrl || photo.file_url || photo.url) : (photo.displayUrl || photo.file_url || photo.url))}
+            src={highResRequested ? highResSrc : previewSrc}
             alt={photo.fileName}
             className="max-h-[85vh] max-w-full object-contain"
             onLoad={() => {
@@ -260,11 +291,12 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurren
         <ChevronRight className="h-6 w-6" />
       </button>
 
-      <div className="absolute bottom-4 left-1/2 flex -translate-x-1/2 items-center gap-3 text-sm text-white/70">
+      <div className="absolute bottom-[max(1.5rem,env(safe-area-inset-bottom))] left-1/2 flex -translate-x-1/2 items-center gap-3 text-sm text-white/70">
         {!highResLoaded && (
           <button
             type="button"
-            className="rounded-full border border-white/15 bg-white/5 px-3 py-1 text-xs text-white/85 transition hover:bg-white/10"
+            className="rounded-full border border-white/15 bg-white/5 px-3 py-1 text-xs text-white/85 transition hover:bg-white/10 disabled:opacity-50"
+            disabled={highResRequested && imageLoading}
             onClick={(e) => {
               e.stopPropagation()
               setHighResRequested(true)
@@ -272,15 +304,15 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurren
               setHighResFailed(false)
             }}
           >
-            查看高清大图
+            {highResRequested && imageLoading ? '高清加载中…' : '查看高清大图'}
           </button>
         )}
         <span>{index + 1} / {photos.length}</span>
       </div>
 
       {highResFailed && (
-        <div className="absolute bottom-14 left-1/2 z-20 -translate-x-1/2 rounded-full border border-white/10 bg-black/60 px-3 py-1 text-xs text-white/85 backdrop-blur">
-          高清图加载失败，已保留当前预览图
+        <div className="absolute bottom-[calc(max(1.5rem,env(safe-area-inset-bottom))+2.5rem)] left-1/2 z-20 -translate-x-1/2 rounded-full border border-white/10 bg-black/60 px-3 py-1 text-xs text-white/85 backdrop-blur">
+          高清原图不可用，当前已是最高可用画质
         </div>
       )}
 
@@ -316,7 +348,8 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurren
           </div>
         </div>
       )}
-    </div>
+    </div>,
+    document.body
   );
 };
 

@@ -29,6 +29,14 @@ const ASSET_ACCEPT: Record<AssetKey, string> = {
   watermark_logo: 'image/png,image/svg+xml',
 }
 
+const ASSET_SPECS: Record<AssetKey, { label: string; recommendedSize?: string; maxMb: number }> = {
+  cover: { label: 'Cover', recommendedSize: '500 × 500 px', maxMb: 2 },
+  banner: { label: 'Banner', recommendedSize: '1500 × 844 px', maxMb: 3 },
+  splash_poster: { label: 'Splash Poster', recommendedSize: '1500 × 2668 px', maxMb: 5 },
+  loading_gif: { label: 'Loading GIF', maxMb: 10 },
+  watermark_logo: { label: 'Watermark Logo', maxMb: 5 },
+}
+
 function formatBytesToMb(bytes: number) {
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`
 }
@@ -126,6 +134,9 @@ function AssetSection({
               <p className="text-sm font-medium text-foreground">{title}</p>
               <p className="text-xs text-muted-foreground">
                 {asset?.file_name ? `${asset.file_name} · ${formatBytesToMb(asset.file_size_bytes || 0)}` : 'No file uploaded'}
+              </p>
+              <p className="text-[11px] text-muted-foreground">
+                Recommended: {ASSET_SPECS[assetKey].recommendedSize ? `${ASSET_SPECS[assetKey].recommendedSize} · ` : ''}max {ASSET_SPECS[assetKey].maxMb} MB
               </p>
             </div>
           </button>
@@ -292,6 +303,25 @@ export default function ProjectEditDialog({
     setAssetUploading(assetType);
     setError(null);
     try {
+      const maxBytes = ASSET_SPECS[assetType].maxMb * 1024 * 1024
+      if (file.size > maxBytes) {
+        setError(`${ASSET_SPECS[assetType].label} must be smaller than ${ASSET_SPECS[assetType].maxMb} MB`)
+        return
+      }
+
+      if (['cover', 'banner', 'splash_poster'].includes(assetType)) {
+        const size = await new Promise<{ width: number; height: number } | null>((resolve) => {
+          const img = new Image()
+          img.onload = () => resolve({ width: img.width, height: img.height })
+          img.onerror = () => resolve(null)
+          img.src = URL.createObjectURL(file)
+        })
+        if (!size) {
+          setError(`Could not read ${ASSET_SPECS[assetType].label} image dimensions`)
+          return
+        }
+      }
+
       const form = new FormData();
       form.append('assetType', assetType);
       form.append('file', file);
