@@ -1,0 +1,1 @@
+-- No schema change required for last_sync_at because it is stored inside projects.ftp_ingest JSONB.

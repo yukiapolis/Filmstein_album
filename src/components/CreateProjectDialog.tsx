@@ -51,7 +51,11 @@ export default function CreateProjectDialog({ open, onClose, onSuccess }: Create
       const res = await fetch("/api/projects", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: name.trim(), clientName: clientName.trim() }),
+        body: JSON.stringify({
+          name: name.trim(),
+          clientName: clientName.trim(),
+          type,
+        }),
       });
       const body = await res.json();
 

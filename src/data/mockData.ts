@@ -14,6 +14,13 @@ export interface Project {
   status: ProjectStatus;
   clientName: string;
   description: string;
+  ftp_ingest?: {
+    enabled?: boolean;
+    buffer_api_base_url?: string;
+    project_code?: string;
+    auto_sync_interval_seconds?: number;
+    last_sync_at?: string | null;
+  };
 }
 
 export interface Album {
@@ -39,6 +46,14 @@ export interface Photo {
   folderId?: string;
   originalFileId?: string;
   retouchedFileId?: string;
+  thumbUrl?: string;
+  displayUrl?: string;
+  downloadUrl?: string;
+  retouchedOriginalUrl?: string;
+  originalUrl?: string;
+  versionCount?: number;
+  latestVersionNo?: number;
+  firstVersionNo?: number;
   isPublished?: boolean;
 }
 

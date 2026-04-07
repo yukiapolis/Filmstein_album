@@ -2,9 +2,7 @@ import { DeleteObjectCommand } from '@aws-sdk/client-s3'
 import { promises as fs } from 'node:fs'
 import { supabase } from '@/lib/supabase/server'
 import { r2 } from '@/lib/r2/client'
-
-const BRANCH_TYPE_DISPLAY = 'display'
-const BRANCH_TYPE_ORIGINAL = 'original'
+import { getLatestVersionNo, getVersionFiles, groupPhotoFilesByVersion, type PhotoFileRow } from '@/lib/photoVersions'
 
 type DeleteMode = 'current-version' | 'all-versions'
 
@@ -75,9 +73,9 @@ export async function PATCH(req: Request) {
 export async function DELETE(req: Request) {
   try {
     const body = await req.json()
-    const { photoIds, fileIds, mode } = body as {
+    const { photoIds, versionNoByPhotoId, mode } = body as {
       photoIds?: string[]
-      fileIds?: string[]
+      versionNoByPhotoId?: Record<string, number>
       mode?: DeleteMode
     }
 
@@ -127,72 +125,80 @@ export async function DELETE(req: Request) {
       return Response.json({ success: true, deletedPhotoIds: photoIds, mode: deleteMode, cleanupErrors })
     }
 
-    if (!Array.isArray(fileIds) || fileIds.length === 0) {
-      return Response.json({ success: false, error: 'fileIds is required for current-version delete' }, { status: 400 })
+    if (!Array.isArray(photoIds) || photoIds.length === 0) {
+      return Response.json({ success: false, error: 'photoIds is required for current-version delete' }, { status: 400 })
     }
 
     const { data: files, error: filesError } = await supabase
       .from('photo_files')
-      .select('id, photo_id, branch_type, storage_provider, bucket_name, object_key')
-      .in('id', fileIds)
+      .select('id, photo_id, branch_type, storage_provider, bucket_name, object_key, version_no, created_at')
+      .in('photo_id', photoIds)
+      .order('version_no', { ascending: false })
+      .order('created_at', { ascending: false })
 
     if (filesError) {
       return Response.json({ success: false, error: filesError.message }, { status: 500 })
     }
 
-    if (!files || files.length === 0) {
-      return Response.json({ success: false, error: 'No matching files found' }, { status: 404 })
+    const filesByPhotoId = new Map<string, PhotoFileRow[]>()
+    for (const file of (files ?? []) as PhotoFileRow[]) {
+      const list = filesByPhotoId.get(file.photo_id) ?? []
+      list.push(file)
+      filesByPhotoId.set(file.photo_id, list)
     }
 
-    const photoIdsToRefresh = Array.from(new Set(files.map((f) => f.photo_id)))
-
-    const { error: deleteFileError } = await supabase
-      .from('photo_files')
-      .delete()
-      .in('id', fileIds)
-
-    if (deleteFileError) {
-      return Response.json({ success: false, error: deleteFileError.message }, { status: 500 })
-    }
-
+    const deleteFileIds: string[] = []
+    const deletedPhotoIds: string[] = []
+    const deletedVersions: Array<{ photoId: string; versionNo: number }> = []
     const cleanupErrors: string[] = []
-    for (const file of files as FileRow[]) {
-      try {
-        await deleteStoredAsset(file)
-      } catch (err) {
-        cleanupErrors.push(`${file.id}:${err instanceof Error ? err.message : String(err)}`)
-      }
-    }
 
-    for (const photoId of photoIdsToRefresh) {
-      const { data: remainingFiles, error: remainingError } = await supabase
+    for (const photoId of photoIds) {
+      const rows = filesByPhotoId.get(photoId) ?? []
+      if (rows.length === 0) continue
+
+      const latestVersionNo = getLatestVersionNo(rows)
+      const targetVersionNo = versionNoByPhotoId?.[photoId] ?? latestVersionNo
+      if (!targetVersionNo) continue
+      const versionBundle = getVersionFiles(rows, targetVersionNo)
+      if (!versionBundle) continue
+
+      const allVersions = groupPhotoFilesByVersion(rows)
+
+      const { error: deleteVersionError } = await supabase
         .from('photo_files')
-        .select('id, branch_type, created_at')
+        .delete()
         .eq('photo_id', photoId)
-        .order('created_at', { ascending: false })
+        .eq('version_no', targetVersionNo)
 
-      if (remainingError) {
-        return Response.json({ success: false, error: remainingError.message }, { status: 500 })
+      if (deleteVersionError) {
+        return Response.json({ success: false, error: deleteVersionError.message }, { status: 500 })
       }
 
-      const displayFile = remainingFiles?.find((f) => f.branch_type === BRANCH_TYPE_DISPLAY) ?? null
-      const originalFile = remainingFiles?.find((f) => f.branch_type === BRANCH_TYPE_ORIGINAL) ?? null
+      for (const file of versionBundle.files as FileRow[]) {
+        deleteFileIds.push(file.id)
+        try {
+          await deleteStoredAsset(file)
+        } catch (err) {
+          cleanupErrors.push(`${file.id}:${err instanceof Error ? err.message : String(err)}`)
+        }
+      }
 
-      const { error: updatePhotoError } = await supabase
-        .from('photos')
-        .update({
-          original_file_id: originalFile?.id ?? null,
-          retouched_file_id: displayFile?.id ?? originalFile?.id ?? null,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('global_photo_id', photoId)
+      deletedVersions.push({ photoId, versionNo: targetVersionNo })
 
-      if (updatePhotoError) {
-        return Response.json({ success: false, error: updatePhotoError.message }, { status: 500 })
+      if (allVersions.length <= 1) {
+        const { error: deletePhotoError } = await supabase
+          .from('photos')
+          .delete()
+          .eq('global_photo_id', photoId)
+
+        if (deletePhotoError) {
+          return Response.json({ success: false, error: deletePhotoError.message }, { status: 500 })
+        }
+        deletedPhotoIds.push(photoId)
       }
     }
 
-    return Response.json({ success: true, deletedFileIds: fileIds, mode: deleteMode, cleanupErrors })
+    return Response.json({ success: true, deletedFileIds: deleteFileIds, deletedPhotoIds, deletedVersions, mode: deleteMode, cleanupErrors })
   } catch {
     return Response.json({ success: false, error: 'Server error' }, { status: 500 })
   }

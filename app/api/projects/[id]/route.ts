@@ -1,25 +1,11 @@
 import { supabase } from '@/lib/supabase/server'
 import { mapRowToProject } from '@/lib/mapProject'
 import { mapRowToPhoto } from '@/lib/mapPhoto'
+import { getFirstVersionFiles, getFirstVersionNo, getLatestVersionFiles, getLatestVersionNo, groupPhotoFilesByVersion, type PhotoFileRow } from '@/lib/photoVersions'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
-type FileRow = {
-  id: string
-  photo_id: string
-  file_name: string | null
-  original_file_name: string | null
-  object_key: string | null
-  storage_provider: string | null
-  bucket_name: string | null
-  created_at: string | null
-  branch_type: string | null
-  version_no: number | null
-}
-
-const BRANCH_TYPE_ORIGINAL = 'original'
-const BRANCH_TYPE_THUMB = 'thumb'
-const BRANCH_TYPE_DISPLAY = 'display'
+type FileRow = PhotoFileRow
 
 export async function GET(req: Request, context: RouteContext) {
   try {
@@ -87,20 +73,20 @@ export async function GET(req: Request, context: RouteContext) {
 
     const project = mapRowToProject(projectRow as Record<string, unknown>)
     const photos = (photoRows ?? []).map((row) => {
-      const fileRows = [...(filesByPhotoId.get(row.global_photo_id) ?? [])].sort((a, b) => {
-        const versionDiff = (Number(b.version_no) || 0) - (Number(a.version_no) || 0)
-        if (versionDiff !== 0) return versionDiff
-        return (b.created_at || '').localeCompare(a.created_at || '')
-      })
-      const originalFile = fileRows.find((f) => f.branch_type === BRANCH_TYPE_ORIGINAL) ?? null
-      const thumbFile = fileRows.find((f) => f.branch_type === BRANCH_TYPE_THUMB) ?? null
-      const displayFile = fileRows.find((f) => f.branch_type === BRANCH_TYPE_DISPLAY) ?? null
+      const fileRows = filesByPhotoId.get(row.global_photo_id) ?? []
+      const latestVersion = getLatestVersionFiles(fileRows)
+      const firstVersion = getFirstVersionFiles(fileRows)
+      const versionCount = groupPhotoFilesByVersion(fileRows).length
 
       return mapRowToPhoto({
         ...(row as Record<string, unknown>),
-        original_file: originalFile,
-        thumb_file: thumbFile,
-        display_file: displayFile,
+        latest_original_file: latestVersion?.byBranch.original ?? null,
+        latest_thumb_file: latestVersion?.byBranch.thumb ?? null,
+        latest_display_file: latestVersion?.byBranch.display ?? null,
+        first_original_file: firstVersion?.byBranch.original ?? null,
+        version_count: versionCount,
+        latest_version_no: getLatestVersionNo(fileRows),
+        first_version_no: getFirstVersionNo(fileRows),
       })
     })
     project.photoCount = photos.length
@@ -126,6 +112,7 @@ export async function PATCH(req: Request, context: RouteContext) {
     if (typeof body.status === 'string') updates.status = body.status
     if (typeof body.description === 'string') updates.description = body.description.trim()
     if (typeof body.cover_url === 'string') updates.cover_url = body.cover_url.trim()
+    if (body.ftp_ingest && typeof body.ftp_ingest === 'object') updates.ftp_ingest = body.ftp_ingest
 
     if (Object.keys(updates).length === 0) {
       return Response.json({ success: false, error: 'No fields to update' }, { status: 400 })

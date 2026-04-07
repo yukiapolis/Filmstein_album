@@ -27,8 +27,17 @@ interface UploadFile {
   id: string;
   fileName: string;
   size: string;
-  status: "Pending" | "Uploading" | "Completed" | "Failed";
+  status: "Pending" | "Uploading" | "Completed" | "Failed" | "Skipped";
   progress: number;
+  analysisType?: "new" | "retouch" | "duplicate" | "unknown";
+  classification?: "duplicate_original" | "retouch_upload" | "new_original" | "unknown" | "invalid_retouch_reference";
+  matchedPhotoId?: string | null;
+  matchedVersionNo?: number | null;
+  nextVersionNo?: number | null;
+  checksumSha256?: string;
+  normalizedBaseName?: string;
+  reason?: string;
+  uploadDecision?: "skip" | "overwrite" | null;
   /** Cached File object for upload; cleared after send to avoid memory leaks. */
   _raw?: File;
 }
@@ -67,6 +76,7 @@ const UploadPanel = ({
   const [selectedFolderId, setSelectedFolderId] = useState<string>("");
   const [showNewFolder, setShowNewFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
+  const [mixedBatchActionOpen, setMixedBatchActionOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Sync when panel opens
@@ -79,27 +89,58 @@ const UploadPanel = ({
     }
   }, [open, initialFolderId]);
 
-  const addFiles = useCallback((rawFiles: FileList | File[]) => {
-    const newFiles: UploadFile[] = Array.from(rawFiles).map((f) => ({
-      id: crypto.randomUUID(),
-      fileName: f.name,
-      size: formatFileSize(f.size),
-      status: "Pending" as const,
-      progress: 0,
-      _raw: f,
-    }));
-    setFiles((prev) => [...prev, ...newFiles]);
-  }, []);
+  const addFiles = useCallback(async (rawFiles: FileList | File[]) => {
+    const pendingFiles: UploadFile[] = [];
+
+    for (const f of Array.from(rawFiles)) {
+      const item: UploadFile = {
+        id: crypto.randomUUID(),
+        fileName: f.name,
+        size: formatFileSize(f.size),
+        status: "Pending",
+        progress: 0,
+        _raw: f,
+      };
+
+      if (projectId) {
+        const formData = new FormData();
+        formData.append('file', f);
+        formData.append('projectId', projectId);
+        const res = await fetch('/api/upload?analyze=true', { method: 'POST', body: formData });
+        const body = await res.json().catch(() => null);
+        if (res.ok && body?.success && body?.data) {
+          item.classification = body.data.classification;
+          item.analysisType = body.data.classification === 'duplicate_original'
+            ? 'duplicate'
+            : body.data.classification === 'retouch_upload'
+              ? 'retouch'
+              : body.data.classification === 'new_original'
+                ? 'new'
+                : 'unknown';
+          item.matchedPhotoId = body.data.matchedPhotoId ?? null;
+          item.matchedVersionNo = body.data.matchedVersionNo ?? null;
+          item.nextVersionNo = body.data.nextVersionNo ?? null;
+          item.checksumSha256 = body.data.checksumSha256;
+          item.normalizedBaseName = body.data.normalizedBaseName;
+          item.reason = body.data.reason;
+        }
+      }
+
+      pendingFiles.push(item);
+    }
+
+    setFiles((prev) => [...prev, ...pendingFiles]);
+  }, [projectId]);
 
   const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files) addFiles(e.target.files);
+    if (e.target.files) void addFiles(e.target.files);
     e.target.value = "";
   };
 
   const handleDrop = (e: React.DragEvent<HTMLElement>) => {
     e.preventDefault();
     setIsDragging(false);
-    if (e.dataTransfer.files.length > 0) addFiles(e.dataTransfer.files);
+    if (e.dataTransfer.files.length > 0) void addFiles(e.dataTransfer.files);
   };
 
   const handleRemove = (id: string) => {
@@ -110,6 +151,10 @@ const UploadPanel = ({
     setFiles((prev) =>
       prev.map((f) => (f.id === id ? { ...f, status, progress } : f)),
     );
+  };
+
+  const setUploadDecision = (id: string, uploadDecision: UploadFile['uploadDecision']) => {
+    setFiles((prev) => prev.map((f) => (f.id === id ? { ...f, uploadDecision } : f)));
   };
 
   const handleNewFolder = async () => {
@@ -149,6 +194,15 @@ const UploadPanel = ({
     formData.append("file", file._raw);
     formData.append("projectId", projectId);
     formData.append("displayPreset", displayPreset);
+    if (file.classification === 'retouch_upload') {
+      formData.append('uploadCategory', 'retouch');
+    }
+    if (file.uploadDecision === 'overwrite') {
+      formData.append('uploadCategory', 'overwrite-original');
+      if (file.matchedPhotoId) {
+        formData.append('photoId', file.matchedPhotoId);
+      }
+    }
     if (selectedFolderId) {
       formData.append("folderId", selectedFolderId);
       // Also send folder name for backward compatibility
@@ -164,7 +218,15 @@ const UploadPanel = ({
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         console.error(`[UploadPanel] ${file.fileName}:`, body?.error ?? `HTTP ${res.status}`);
-        setStatus(file.id, "Failed", 0);
+        setFiles((prev) => prev.map((f) => f.id === file.id ? {
+          ...f,
+          status: 'Failed',
+          progress: 0,
+          classification: body?.code === 'EXACT_DUPLICATE' && f.uploadDecision === 'overwrite' ? f.classification : body?.code === 'EXACT_DUPLICATE' ? 'duplicate_original' : f.classification,
+          analysisType: body?.code === 'EXACT_DUPLICATE' ? 'duplicate' : f.analysisType,
+          matchedPhotoId: body?.duplicateOf?.photoId ?? f.matchedPhotoId,
+          matchedVersionNo: body?.duplicateOf?.versionNo ?? f.matchedVersionNo,
+        } : f));
         return false;
       }
 
@@ -178,28 +240,54 @@ const UploadPanel = ({
   };
 
   /** Upload all Pending files in parallel (up to a concurrency cap) or serially. */
+  const handleUploadSubset = async (subset: UploadFile[]) => {
+    if (!subset.length || !projectId) return;
+
+    let completed = 0;
+    for (const file of subset) {
+      if (file.classification === 'duplicate_original' || file.analysisType === 'duplicate') {
+        if (file.uploadDecision === 'skip') {
+          setStatus(file.id, 'Skipped', 0);
+          continue;
+        }
+        if (file.classification === 'duplicate_original' && file.uploadDecision !== 'overwrite') {
+          continue;
+        }
+      }
+      const ok = await uploadOne(file);
+      if (ok) completed++;
+      onUploadDone?.(completed);
+    }
+    onUploadDone?.(completed);
+  };
+
   const handleUpload = async () => {
     const pending = files.filter((f) => f.status === "Pending");
     if (!pending.length || !projectId) return;
 
-    let completed = 0;
+    const actionable = pending.filter((f) => !(f.classification === 'duplicate_original' && fileNeedsDecision(f)));
+    const hasRetouch = actionable.some((f) => f.classification === 'retouch_upload');
+    const hasNormal = actionable.some((f) => f.classification === 'new_original' || f.classification === 'unknown');
 
-    // Sequential upload keeps the UX clearer (progress bars advance one-by-one)
-    for (const file of pending) {
-      const ok = await uploadOne(file);
-      if (ok) completed++;
-      // Trigger refresh after each file so the list updates in real time
-      onUploadDone?.(completed);
+    if (hasRetouch && hasNormal) {
+      setMixedBatchActionOpen(true);
+      return;
     }
 
-    // Final call in case no files were pending to begin with
-    onUploadDone?.(completed);
+    await handleUploadSubset(actionable);
   };
 
   if (!open) return null;
 
+  const fileNeedsDecision = (file: UploadFile) => file.classification === 'duplicate_original' && !file.uploadDecision;
+
   const pendingCount = files.filter((f) => f.status === "Pending").length;
   const allDone = pendingCount === 0 && files.length > 0;
+  const pendingFiles = files.filter((f) => f.status === 'Pending');
+  const actionablePendingFiles = pendingFiles.filter((f) => f.classification !== 'duplicate_original');
+  const pendingRetouchCount = actionablePendingFiles.filter((f) => f.classification === 'retouch_upload').length;
+  const pendingNormalCount = actionablePendingFiles.filter((f) => f.classification === 'new_original' || f.classification === 'unknown').length;
+  const pendingDuplicateCount = pendingFiles.filter((f) => f.classification === 'duplicate_original').length;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
@@ -310,6 +398,9 @@ const UploadPanel = ({
                     Upload All ({pendingCount})
                   </Button>
                 )}
+                {pendingDuplicateCount > 0 && (
+                  <span className="text-xs text-amber-700">{pendingDuplicateCount} duplicate file(s) need decision</span>
+                )}
               </div>
               <ul className="max-h-80 space-y-2 overflow-y-auto pr-1">
                 {files.map((file) => (
@@ -318,6 +409,14 @@ const UploadPanel = ({
                     <div className="flex-1 min-w-0">
                       <p className="truncate text-sm text-foreground">{file.fileName}</p>
                       <p className="text-xs text-muted-foreground">{file.size}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {file.classification === 'new_original' && `New original${file.normalizedBaseName ? ` · ${file.normalizedBaseName}` : ''}`}
+                        {file.classification === 'retouch_upload' && `Retouch upload${file.matchedPhotoId ? ` · ${file.matchedPhotoId}` : ''}${file.nextVersionNo ? ` · v${file.nextVersionNo}` : ''}`}
+                        {file.classification === 'duplicate_original' && `Duplicate original${file.matchedPhotoId ? ` · ${file.matchedPhotoId}` : ''}`}
+                        {file.classification === 'invalid_retouch_reference' && `Invalid retouch reference${file.reason ? ` · ${file.reason}` : ''}`}
+                        {file.classification === 'unknown' && `Unknown${file.reason ? ` · ${file.reason}` : ''}`}
+                        {!file.classification && 'Analyzing…'}
+                      </p>
                     </div>
                     {file.status === "Uploading" && (
                       <div className="w-24">
@@ -330,6 +429,16 @@ const UploadPanel = ({
                       </div>
                     )}
                     <span className="text-xs text-muted-foreground whitespace-nowrap">{file.status}</span>
+                    {file.classification === 'duplicate_original' && file.status === 'Pending' && (
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Button size="sm" variant={file.uploadDecision === 'skip' ? 'secondary' : 'outline'} type="button" onClick={() => setUploadDecision(file.id, 'skip')}>
+                          Skip
+                        </Button>
+                        <Button size="sm" variant={file.uploadDecision === 'overwrite' ? 'secondary' : 'outline'} type="button" onClick={() => setUploadDecision(file.id, 'overwrite')}>
+                          Overwrite
+                        </Button>
+                      </div>
+                    )}
                     {file.status === "Pending" && (
                       <button
                         type="button"
@@ -357,6 +466,36 @@ const UploadPanel = ({
                   </li>
                 ))}
               </ul>
+            </div>
+          )}
+          {mixedBatchActionOpen && (
+            <div className="rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
+              <p className="font-medium">Mixed batch detected</p>
+              <p className="mt-1">本批包含普通图片 {pendingNormalCount} 张，修图版本 {pendingRetouchCount} 张。这两类图片处理规则不同。</p>
+              {pendingDuplicateCount > 0 && (
+                <p className="mt-1 text-xs">另外有重复图片 {pendingDuplicateCount} 张，当前不会进入上传。</p>
+              )}
+              <ul className="mt-2 list-disc pl-5 text-xs">
+                <li>普通图片会生成压缩 display</li>
+                <li>修图版本会直接使用原文件作为 display</li>
+              </ul>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Button size="sm" variant="outline" type="button" onClick={async () => {
+                  setMixedBatchActionOpen(false);
+                  await handleUploadSubset(actionablePendingFiles.filter((f) => f.classification === 'new_original' || f.classification === 'unknown'));
+                }}>
+                  仅上传普通图片
+                </Button>
+                <Button size="sm" variant="outline" type="button" onClick={async () => {
+                  setMixedBatchActionOpen(false);
+                  await handleUploadSubset(actionablePendingFiles.filter((f) => f.classification === 'retouch_upload'));
+                }}>
+                  仅上传修图版本
+                </Button>
+                <Button size="sm" variant="ghost" type="button" onClick={() => setMixedBatchActionOpen(false)}>
+                  取消
+                </Button>
+              </div>
             </div>
           )}
         </div>

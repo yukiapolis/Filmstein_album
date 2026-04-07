@@ -92,20 +92,51 @@ export async function DELETE(req: Request, context: RouteContext) {
     const { id } = await context.params
     const { folderIds, folderId } = await req.json()
 
-    const ids = Array.isArray(folderIds)
+    const seedIds = Array.isArray(folderIds)
       ? folderIds.filter((value): value is string => typeof value === 'string' && value.length > 0)
       : typeof folderId === 'string' && folderId
         ? [folderId]
         : []
 
-    if (ids.length === 0) {
+    if (seedIds.length === 0) {
       return Response.json({ success: false, error: 'Invalid folder id' }, { status: 400 })
     }
+
+    const { data: allFolders, error: allFoldersError } = await supabase
+      .from('project_folders')
+      .select('id, parent_id')
+      .eq('project_id', id)
+
+    if (allFoldersError) {
+      return Response.json({ success: false, error: allFoldersError.message }, { status: 500 })
+    }
+
+    const childrenByParent = new Map<string, string[]>()
+    for (const folder of allFolders ?? []) {
+      if (!folder.parent_id) continue
+      const list = childrenByParent.get(folder.parent_id) ?? []
+      list.push(folder.id)
+      childrenByParent.set(folder.parent_id, list)
+    }
+
+    const idsToDelete = new Set(seedIds)
+    const queue = [...seedIds]
+    while (queue.length > 0) {
+      const currentId = queue.shift()!
+      const childIds = childrenByParent.get(currentId) ?? []
+      for (const childId of childIds) {
+        if (idsToDelete.has(childId)) continue
+        idsToDelete.add(childId)
+        queue.push(childId)
+      }
+    }
+
+    const resolvedIds = Array.from(idsToDelete)
 
     const { error: clearPhotosError } = await supabase
       .from('photos')
       .update({ folder_id: null })
-      .in('folder_id', ids)
+      .in('folder_id', resolvedIds)
       .eq('project_id', id)
 
     if (clearPhotosError) {
@@ -115,14 +146,14 @@ export async function DELETE(req: Request, context: RouteContext) {
     const { error } = await supabase
       .from('project_folders')
       .delete()
-      .in('id', ids)
+      .in('id', resolvedIds)
       .eq('project_id', id)
 
     if (error) {
       return Response.json({ success: false, error: error.message }, { status: 500 })
     }
 
-    return Response.json({ success: true })
+    return Response.json({ success: true, deletedFolderIds: resolvedIds })
   } catch {
     return Response.json({ success: false, error: 'Server error' }, { status: 500 })
   }
