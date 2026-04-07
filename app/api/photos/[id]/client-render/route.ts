@@ -151,15 +151,16 @@ async function buildClientImage(request: NextRequest, context: RouteContext, hea
     const opacity = Math.min(1, Math.max(0, Number(watermark.opacity ?? 1)))
     const offsetXRatio = Number(watermark.offset_x ?? 0) / 100
     const offsetYRatio = Number(watermark.offset_y ?? 0) / 100
-    const logoWidth = Math.max(80, Math.round(width * (mode === 'download' ? 0.14 : 0.12) * scale))
+    const sizeBasis = Math.min(width, height)
+    const logoWidth = Math.max(80, Math.round(sizeBasis * (mode === 'download' ? 0.18 : 0.16) * scale))
     const resizedLogo = await sharp(logoBuffer).resize({ width: logoWidth }).png().toBuffer()
     const resizedMeta = await sharp(resizedLogo).metadata()
     const wmWidth = resizedMeta.width || logoWidth
     const wmHeight = resizedMeta.height || Math.round(logoWidth / 2)
     const position = String(watermark.position || 'bottom-right')
 
-    const marginX = Math.round(width * 0.035)
-    const marginY = Math.round(height * 0.035)
+    const marginX = Math.round(sizeBasis * 0.04)
+    const marginY = Math.round(sizeBasis * 0.04)
     const offsetXPx = Math.round(width * offsetXRatio)
     const offsetYPx = Math.round(height * offsetYRatio)
 

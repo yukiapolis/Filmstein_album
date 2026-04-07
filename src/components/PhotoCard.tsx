@@ -82,7 +82,10 @@ const PhotoCard = ({
   if (variant === "overlay") {
     return (
       <div
-        className="group relative cursor-pointer overflow-hidden rounded-none bg-muted/70 shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md"
+        className={cn(
+          "group relative cursor-pointer overflow-hidden bg-muted/70 shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md",
+          forceSquare ? "aspect-square rounded-none" : "rounded-none"
+        )}
         onClick={onClick}
       >
         <div className="overflow-hidden">
@@ -115,17 +118,6 @@ const PhotoCard = ({
           >
             {selected && <Check className="h-3.5 w-3.5 text-primary-foreground" />}
           </button>
-        )}
-
-        {!hideMetaOverlay && (
-          <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/60 to-transparent p-3 pt-8 opacity-0 transition-opacity group-hover:opacity-100">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs font-medium text-white">{photo.fileName}</p>
-                <p className="text-xs text-white/70">{photo.tag}</p>
-              </div>
-            </div>
-          </div>
         )}
       </div>
     );

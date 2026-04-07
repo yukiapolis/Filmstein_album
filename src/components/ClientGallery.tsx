@@ -298,8 +298,6 @@ const ClientGallery = ({
             <p className="py-12 text-center text-sm text-muted-foreground">Loading photos…</p>
           ) : error ? (
             <p className="py-12 text-center text-sm text-destructive" role="alert">{error}</p>
-          ) : filtered.length === 0 ? (
-            <EmptyState message="No published photos yet." />
           ) : (
             <div className="space-y-4 sm:space-y-5">
               <section>
@@ -359,7 +357,12 @@ const ClientGallery = ({
                   </div>
                 </div>
 
-                {galleryMode === 'timeline' ? (
+                {filtered.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed border-border bg-card px-6 py-16 text-center">
+                    <p className="text-sm font-medium text-foreground">No published photos yet</p>
+                    <p className="mt-1 text-sm text-muted-foreground">This gallery is ready, but no published photos are available yet.</p>
+                  </div>
+                ) : galleryMode === 'timeline' ? (
                   <div className="space-y-8">
                     {timelineGroups.map((group) => (
                       <section key={group.key} className="space-y-3">
@@ -371,7 +374,7 @@ const ClientGallery = ({
                             photos={group.photos}
                             viewMode="grid"
                             selectedIds={[]}
-                            cardVariant="gallery"
+                            cardVariant="overlay"
                             hideStatusBadge
                             hideMetaOverlay
                             hideDownloadButton
@@ -389,7 +392,7 @@ const ClientGallery = ({
                     photos={filtered}
                     viewMode="grid"
                     selectedIds={[]}
-                    cardVariant="gallery"
+                    cardVariant="overlay"
                     hideStatusBadge
                     hideMetaOverlay
                     hideDownloadButton
