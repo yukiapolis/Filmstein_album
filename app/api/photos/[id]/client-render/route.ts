@@ -8,6 +8,16 @@ import { resolvePhotoPublicUrl } from '@/lib/resolvePhotoPublicUrl'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
+type CacheEntry = {
+  buffer: Buffer
+  contentType: string
+  filename: string
+  expiresAt: number
+}
+
+const watermarkedImageCache = new Map<string, CacheEntry>()
+const CACHE_TTL_MS = 1000 * 60 * 10
+
 function getSupabaseAdmin() {
   const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL
   const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
@@ -17,6 +27,20 @@ function getSupabaseAdmin() {
   }
 
   return createClient(supabaseUrl, supabaseKey)
+}
+
+function getCacheKey(input: {
+  photoId: string
+  mode: 'preview' | 'download'
+  versionNo: number
+  logoUrl?: string
+  position: string
+  offsetX: number
+  offsetY: number
+  scale: number
+  opacity: number
+}) {
+  return JSON.stringify(input)
 }
 
 async function buildClientImage(request: NextRequest, context: RouteContext, headOnly = false) {
@@ -36,7 +60,7 @@ async function buildClientImage(request: NextRequest, context: RouteContext, hea
 
     const { data: projectRow, error: projectError } = await supabase
       .from('projects')
-      .select('project_assets, visual_settings, name')
+      .select('project_assets, visual_settings')
       .eq('id', photoRow.project_id)
       .maybeSingle()
 
@@ -62,68 +86,117 @@ async function buildClientImage(request: NextRequest, context: RouteContext, hea
 
     if (!targetFile) return Response.json({ error: 'No file found' }, { status: 404 })
 
+    const versionNo = Number(targetFile.version_no ?? latestVersion?.versionNo ?? 1)
     const imageUrl = resolvePhotoPublicUrl(targetFile as unknown as Record<string, unknown>)
     if (!imageUrl) return Response.json({ error: 'Image source unavailable' }, { status: 404 })
 
-    const imageRes = await fetch(imageUrl)
-    if (!imageRes.ok) return Response.json({ error: 'Failed to fetch image source' }, { status: 502 })
-    const imageBuffer = Buffer.from(await imageRes.arrayBuffer())
+    const cacheKey = getCacheKey({
+      photoId: id,
+      mode,
+      versionNo,
+      logoUrl,
+      position: String(watermark.position || 'bottom-right'),
+      offsetX: Number(watermark.offset_x ?? 0),
+      offsetY: Number(watermark.offset_y ?? 0),
+      scale: Number(watermark.scale ?? 1),
+      opacity: Number(watermark.opacity ?? 1),
+    })
 
-    let outputBuffer = imageBuffer
-    if (watermarkEnabled && logoUrl) {
-      const logoRes = await fetch(logoUrl)
-      if (logoRes.ok) {
-        const logoBuffer = Buffer.from(await logoRes.arrayBuffer())
-        const baseMeta = await sharp(imageBuffer).metadata()
-        const width = baseMeta.width || 1600
-        const height = baseMeta.height || 1200
-        const scale = Math.max(0.2, Number(watermark.scale ?? 1))
-        const opacity = Math.min(1, Math.max(0, Number(watermark.opacity ?? 1)))
-        const offsetX = Number(watermark.offset_x ?? 0)
-        const offsetY = Number(watermark.offset_y ?? 0)
-        const logoWidth = Math.max(80, Math.round(width * 0.18 * scale))
-        const resizedLogo = await sharp(logoBuffer).resize({ width: logoWidth }).png().toBuffer()
-        const resizedMeta = await sharp(resizedLogo).metadata()
-        const wmWidth = resizedMeta.width || logoWidth
-        const wmHeight = resizedMeta.height || Math.round(logoWidth / 2)
-        const position = String(watermark.position || 'bottom-right')
-
-        let left = Math.max(16, width - wmWidth - 24 + offsetX)
-        let top = Math.max(16, height - wmHeight - 24 + offsetY)
-
-        if (position === 'top-left') {
-          left = 24 + offsetX
-          top = 24 + offsetY
-        } else if (position === 'top-right') {
-          left = width - wmWidth - 24 + offsetX
-          top = 24 + offsetY
-        } else if (position === 'bottom-left') {
-          left = 24 + offsetX
-          top = height - wmHeight - 24 + offsetY
-        } else if (position === 'custom') {
-          left = Math.round(width / 2 - wmWidth / 2 + offsetX)
-          top = Math.round(height / 2 - wmHeight / 2 + offsetY)
-        }
-
-        const logoWithOpacity = await sharp(resizedLogo)
-          .ensureAlpha(opacity)
-          .png()
-          .toBuffer()
-
-        outputBuffer = Buffer.from(await sharp(imageBuffer)
-          .composite([{ input: logoWithOpacity, left: Math.max(0, left), top: Math.max(0, top), blend: 'over' }])
-          .jpeg({ quality: mode === 'download' ? 95 : 88 })
-          .toBuffer())
-      }
+    const cached = watermarkedImageCache.get(cacheKey)
+    if (cached && cached.expiresAt > Date.now()) {
+      return new Response(headOnly ? null : new Uint8Array(cached.buffer), {
+        headers: {
+          'Content-Type': cached.contentType,
+          'Content-Disposition': mode === 'download'
+            ? `attachment; filename*=UTF-8''${encodeURIComponent(cached.filename)}`
+            : `inline; filename*=UTF-8''${encodeURIComponent(cached.filename)}`,
+          'Cache-Control': 'public, max-age=600',
+          'X-Watermark-Cache': 'HIT',
+        },
+      })
     }
 
+    if (!watermarkEnabled) {
+      const upstream = await fetch(imageUrl)
+      if (!upstream.ok) return Response.json({ error: 'Failed to fetch image source' }, { status: 502 })
+      return new Response(headOnly ? null : upstream.body, {
+        headers: {
+          'Content-Type': upstream.headers.get('content-type') || 'image/jpeg',
+          'Content-Disposition': mode === 'download'
+            ? `attachment; filename*=UTF-8''${encodeURIComponent(`${id}-${mode}.jpg`)}`
+            : `inline; filename*=UTF-8''${encodeURIComponent(`${id}-${mode}.jpg`)}`,
+          'Cache-Control': 'public, max-age=300',
+          'X-Watermark-Cache': 'BYPASS',
+        },
+      })
+    }
+
+    const [imageRes, logoRes] = await Promise.all([
+      fetch(imageUrl),
+      fetch(logoUrl!),
+    ])
+
+    if (!imageRes.ok) return Response.json({ error: 'Failed to fetch image source' }, { status: 502 })
+    if (!logoRes.ok) return Response.json({ error: 'Failed to fetch watermark logo' }, { status: 502 })
+
+    const [imageBuffer, logoBuffer] = await Promise.all([
+      imageRes.arrayBuffer().then((buffer) => Buffer.from(buffer)),
+      logoRes.arrayBuffer().then((buffer) => Buffer.from(buffer)),
+    ])
+
+    const baseMeta = await sharp(imageBuffer).metadata()
+    const width = baseMeta.width || 1600
+    const height = baseMeta.height || 1200
+    const scale = Math.max(0.2, Number(watermark.scale ?? 1))
+    const opacity = Math.min(1, Math.max(0, Number(watermark.opacity ?? 1)))
+    const offsetX = Number(watermark.offset_x ?? 0)
+    const offsetY = Number(watermark.offset_y ?? 0)
+    const logoWidth = Math.max(80, Math.round(width * (mode === 'download' ? 0.14 : 0.12) * scale))
+    const resizedLogo = await sharp(logoBuffer).resize({ width: logoWidth }).png().toBuffer()
+    const resizedMeta = await sharp(resizedLogo).metadata()
+    const wmWidth = resizedMeta.width || logoWidth
+    const wmHeight = resizedMeta.height || Math.round(logoWidth / 2)
+    const position = String(watermark.position || 'bottom-right')
+
+    let left = Math.max(16, width - wmWidth - 24 + offsetX)
+    let top = Math.max(16, height - wmHeight - 24 + offsetY)
+
+    if (position === 'top-left') {
+      left = 24 + offsetX
+      top = 24 + offsetY
+    } else if (position === 'top-right') {
+      left = width - wmWidth - 24 + offsetX
+      top = 24 + offsetY
+    } else if (position === 'bottom-left') {
+      left = 24 + offsetX
+      top = height - wmHeight - 24 + offsetY
+    } else if (position === 'custom') {
+      left = Math.round(width / 2 - wmWidth / 2 + offsetX)
+      top = Math.round(height / 2 - wmHeight / 2 + offsetY)
+    }
+
+    const logoWithOpacity = await sharp(resizedLogo).ensureAlpha(opacity).png().toBuffer()
+    const outputBuffer = Buffer.from(await sharp(imageBuffer)
+      .composite([{ input: logoWithOpacity, left: Math.max(0, left), top: Math.max(0, top), blend: 'over' }])
+      .jpeg({ quality: mode === 'download' ? 92 : 84, mozjpeg: true })
+      .toBuffer())
+
     const filename = `${photoRow.global_photo_id}-${mode === 'download' ? 'watermarked-large' : 'watermarked-preview'}.jpg`
-    return new Response(headOnly ? null : outputBuffer, {
+    watermarkedImageCache.set(cacheKey, {
+      buffer: outputBuffer,
+      contentType: 'image/jpeg',
+      filename,
+      expiresAt: Date.now() + CACHE_TTL_MS,
+    })
+
+    return new Response(headOnly ? null : new Uint8Array(outputBuffer), {
       headers: {
         'Content-Type': 'image/jpeg',
         'Content-Disposition': mode === 'download'
           ? `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`
           : `inline; filename*=UTF-8''${encodeURIComponent(filename)}`,
+        'Cache-Control': 'public, max-age=600',
+        'X-Watermark-Cache': 'MISS',
       },
     })
   } catch (error) {

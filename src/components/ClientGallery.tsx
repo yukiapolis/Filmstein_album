@@ -39,6 +39,16 @@ type TimelineGroup = {
   photos: Photo[]
 }
 
+function getHourBucket(value: string) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value || 'Unknown time'
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  const hour = String(date.getHours()).padStart(2, '0')
+  return `${year}-${month}-${day} ${hour}:00`
+}
+
 function formatTimelineLabel(value: string) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value || 'Unknown date'
@@ -52,7 +62,7 @@ function formatTimelineLabel(value: string) {
 function groupPhotosForTimeline(photos: Photo[], sortDir: 'asc' | 'desc') {
   const groups = new Map<string, Photo[]>()
   for (const photo of photos) {
-    const key = (photo.uploadedAt || '').slice(0, 10) || 'Unknown date'
+    const key = getHourBucket(photo.uploadedAt || '')
     const list = groups.get(key) ?? []
     list.push(photo)
     groups.set(key, list)
@@ -428,7 +438,7 @@ const ClientGallery = ({
                     forceSquareCards={galleryMode === 'grid'}
                     project={project}
                     gridClassName={galleryMode === 'masonry'
-                      ? 'columns-2 gap-3 space-y-3 sm:columns-3 lg:columns-4 xl:columns-5'
+                      ? 'mx-auto max-w-7xl columns-2 gap-3 space-y-3 sm:columns-3 lg:columns-4 xl:columns-5'
                       : 'grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 lg:gap-4 xl:grid-cols-5 2xl:grid-cols-6'}
                   />
                 )}

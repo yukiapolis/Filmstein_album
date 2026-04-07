@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { X, ChevronLeft, ChevronRight, Download, Heart, Trash2 } from "lucide-react";
+import { X, ChevronLeft, ChevronRight, Download, Heart, Trash2, Info } from "lucide-react";
 import type { Photo } from "@/data/mockData";
 import { Button } from "@/components/ui/button";
 import type { Project } from "@/data/mockData";
@@ -24,6 +24,7 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurren
   const [showDownloadMenu, setShowDownloadMenu] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showInfo, setShowInfo] = useState(false);
 
   const prev = useCallback(() => setIndex((i) => (i > 0 ? i - 1 : photos.length - 1)), [photos.length]);
   const next = useCallback(() => setIndex((i) => (i < photos.length - 1 ? i + 1 : 0)), [photos.length]);
@@ -121,6 +122,9 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurren
             <Trash2 className="h-5 w-5" />
           </Button>
         )}
+        <Button size="icon" variant="ghost" className="text-white hover:bg-white/10" onClick={(e) => { e.stopPropagation(); setShowInfo((v) => !v); }}>
+          <Info className="h-5 w-5" />
+        </Button>
         <div className="relative">
           <Button size="icon" variant="ghost" className="text-white hover:bg-white/10" onClick={(e) => { e.stopPropagation(); setShowDownloadMenu((v) => !v); }}>
             <Download className="h-5 w-5" />
@@ -225,8 +229,15 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurren
       </button>
 
       <div className="absolute bottom-4 left-1/2 -translate-x-1/2 text-sm text-white/70">
-        {photo.fileName} · {index + 1} / {photos.length}
+        {index + 1} / {photos.length}
       </div>
+
+      {showInfo && (
+        <div className="absolute bottom-14 left-1/2 z-20 w-[min(92vw,520px)] -translate-x-1/2 rounded-xl border border-white/10 bg-black/65 px-4 py-3 text-white backdrop-blur">
+          <p className="text-sm font-medium">{photo.fileName}</p>
+          <p className="mt-1 text-xs text-white/75">{photo.uploadedAt || 'Unknown time'}</p>
+        </div>
+      )}
 
       {showDeleteConfirm && (
         <div className="absolute inset-0 z-[60] flex items-center justify-center bg-black/60" onClick={(e) => e.stopPropagation()}>

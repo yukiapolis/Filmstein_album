@@ -237,7 +237,7 @@ const PhotoCard = ({
           </p>
           <p className="text-xs text-muted-foreground">{uploadedAt}</p>
         </div>
-        {!hideDownloadButton && <div className="relative z-30 shrink-0" ref={menuRef}>
+        {!hideDownloadButton && <div className="relative z-30 shrink-0 opacity-0 transition-opacity group-hover:opacity-100" ref={menuRef}>
           <button
             type="button"
             onClick={(e) => {
