@@ -119,11 +119,8 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurren
   };
 
   return (
-    <div className="fixed inset-0 z-[100] flex min-h-[100dvh] items-center justify-center overflow-hidden bg-black/92 backdrop-blur-sm" onClick={onClose}>
+    <div className="fixed inset-0 z-[100] flex min-h-[100dvh] items-center justify-center overflow-hidden bg-black/80 backdrop-blur-md" onClick={onClose}>
       <div className="absolute left-4 top-4 z-10 flex items-center gap-2">
-        <span className="inline-flex items-center rounded-md border border-border/80 bg-white/95 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground shadow-sm">
-          {(photo.versionCount || 1) > 1 ? 'retouched' : 'original'}
-        </span>
         {photo.isPublished === false && (
           <span className="inline-flex items-center rounded-md bg-black/70 px-2 py-0.5 text-[10px] font-semibold text-white shadow-sm">
             未发布

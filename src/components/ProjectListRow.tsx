@@ -1,10 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { Calendar, FolderOpen } from "lucide-react";
+import { Calendar, FolderOpen, HardDrive, Camera } from "lucide-react";
 import type { Project } from "@/data/mockData";
 import StatusBadge from "@/components/StatusBadge";
 import { Button } from "@/components/ui/button";
+import { useState } from "react";
 
 function formatStorage(bytes?: number) {
   const value = typeof bytes === 'number' ? bytes : 0
@@ -28,56 +29,109 @@ function formatCreatedAt(project: Project) {
 
 export default function ProjectListRow({ project }: { project: Project }) {
   const ftpEnabled = Boolean(project.ftp_ingest?.enabled)
+  const [confirmOpen, setConfirmOpen] = useState(false)
+  const [dangerConfirmOpen, setDangerConfirmOpen] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+
+  const handleDelete = async () => {
+    setDeleting(true)
+    try {
+      const res = await fetch(`/api/projects/${project.id}`, { method: 'DELETE' })
+      const body = await res.json().catch(() => null)
+      if (!res.ok || body?.success !== true) {
+        alert(body?.error || 'Delete failed')
+        return
+      }
+      window.location.reload()
+    } finally {
+      setDeleting(false)
+      setDangerConfirmOpen(false)
+      setConfirmOpen(false)
+    }
+  }
 
   return (
-    <div className="rounded-xl border border-border bg-card transition-colors hover:border-primary/20">
-      <div className="flex flex-col gap-4 p-4 lg:flex-row lg:items-center lg:gap-6">
-        <div className="flex min-w-0 flex-1 items-center gap-4">
-          <div className="overflow-hidden rounded-lg border border-border bg-muted">
-            <img src={project.cover_url} alt={project.name} className="h-20 w-20 object-cover" />
-          </div>
-
-          <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-2">
-              <h3 className="truncate text-sm font-semibold text-foreground sm:text-base">{project.name}</h3>
-              <StatusBadge status={project.status} />
+    <>
+      <div className="rounded-xl border border-border bg-card transition-colors hover:border-primary/20">
+        <div className="flex flex-col gap-4 p-4 lg:flex-row lg:items-center lg:gap-6">
+          <div className="flex min-w-0 flex-1 items-center gap-4">
+            <div className="overflow-hidden rounded-lg border border-border bg-muted">
+              <img src={project.cover_url} alt={project.name} className="h-20 w-20 object-cover" />
             </div>
-            <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
-              <span className="inline-flex items-center gap-1">
-                <FolderOpen className="h-3.5 w-3.5" />
-                {project.type}
-              </span>
-              <span className="inline-flex items-center gap-1">
-                <Calendar className="h-3.5 w-3.5" />
-                {formatCreatedAt(project)}
-              </span>
+
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="truncate text-sm font-semibold text-foreground sm:text-base">{project.name}</h3>
+                <StatusBadge status={project.status} />
+              </div>
+              <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
+                <span className="inline-flex items-center gap-1">
+                  <FolderOpen className="h-3.5 w-3.5" />
+                  {project.type}
+                </span>
+                <span className="inline-flex items-center gap-1">
+                  <Calendar className="h-3.5 w-3.5" />
+                  {formatCreatedAt(project)}
+                </span>
+              </div>
             </div>
           </div>
-        </div>
 
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:min-w-[360px] lg:flex-none">
-          <div className="rounded-lg bg-muted/40 px-3 py-2 text-sm font-medium text-foreground">
-            {project.photoCount}
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:min-w-[360px] lg:flex-none">
+            <div className="rounded-lg bg-muted/40 px-3 py-2 text-sm font-medium text-foreground inline-flex items-center gap-1.5">
+              <Camera className="h-3.5 w-3.5" />
+              {project.photoCount}
+            </div>
+
+            <div className="rounded-lg bg-muted/40 px-3 py-2 text-sm font-medium text-foreground inline-flex items-center gap-1.5">
+              <HardDrive className="h-3.5 w-3.5" />
+              {formatStorage(project.storage_used_bytes)}
+            </div>
+
+            <div className={`rounded-lg px-3 py-2 text-sm font-medium ${ftpEnabled ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}>
+              FTP {ftpEnabled ? 'On' : 'Off'}
+            </div>
           </div>
 
-          <div className="rounded-lg bg-muted/40 px-3 py-2 text-sm font-medium text-foreground">
-            {formatStorage(project.storage_used_bytes)}
+          <div className="flex items-center justify-end gap-2 lg:min-w-[220px] lg:flex-none">
+            <Button type="button" variant="outline" size="sm" asChild>
+              <Link href={`/projects/${project.id}/preview`}>View</Link>
+            </Button>
+            <Button type="button" variant="outline" size="sm" asChild>
+              <Link href={`/projects/${project.id}`}>Manage</Link>
+            </Button>
+            <Button type="button" variant="destructive" size="sm" onClick={() => setConfirmOpen(true)}>
+              Delete
+            </Button>
           </div>
-
-          <div className="rounded-lg bg-muted/40 px-3 py-2 text-sm font-medium text-foreground">
-            FTP {ftpEnabled ? 'On' : 'Off'}
-          </div>
-        </div>
-
-        <div className="flex items-center justify-end gap-2 lg:min-w-[160px] lg:flex-none">
-          <Button type="button" variant="outline" size="sm" asChild>
-            <Link href={`/projects/${project.id}`}>Manage</Link>
-          </Button>
-          <Button type="button" variant="outline" size="sm" asChild>
-            <Link href={`/projects/${project.id}/preview`}>View</Link>
-          </Button>
         </div>
       </div>
-    </div>
+
+      {confirmOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-xl border border-border bg-card p-5 shadow-xl">
+            <h3 className="text-base font-semibold text-foreground">Delete project?</h3>
+            <p className="mt-2 text-sm text-muted-foreground">This project and all associated data will be removed. Continue to second confirmation.</p>
+            <div className="mt-4 flex justify-end gap-2">
+              <Button type="button" variant="outline" onClick={() => setConfirmOpen(false)} disabled={deleting}>Cancel</Button>
+              <Button type="button" variant="destructive" onClick={() => { setConfirmOpen(false); setDangerConfirmOpen(true) }} disabled={deleting}>Continue</Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {dangerConfirmOpen && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-md rounded-xl border border-border bg-card p-5 shadow-2xl">
+            <h3 className="text-base font-semibold text-foreground">Confirm permanent deletion</h3>
+            <p className="mt-2 text-sm text-muted-foreground">This will delete the project, related photos, photo_files, project assets, storage objects, and associated database records.</p>
+            <div className="mt-4 flex justify-end gap-2">
+              <Button type="button" variant="outline" onClick={() => setDangerConfirmOpen(false)} disabled={deleting}>Cancel</Button>
+              <Button type="button" variant="destructive" onClick={() => void handleDelete()} disabled={deleting}>{deleting ? 'Deleting…' : 'Delete project'}</Button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   )
 }

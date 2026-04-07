@@ -24,15 +24,21 @@ export async function GET() {
     const projectsWithStats = await Promise.all((data ?? []).map(async (row) => {
       const projectId = String(row.id ?? '')
 
-      const { data: photoRows, error: photoError } = await supabase
+      const { count: photoCount, error: photoError } = await supabase
         .from('photos')
-        .select('global_photo_id, project_id')
+        .select('global_photo_id', { count: 'exact', head: true })
         .eq('project_id', projectId)
 
       if (photoError) throw new Error(photoError.message)
 
-      const photoIds = (photoRows ?? [])
-        .filter((photo) => String(photo.project_id ?? '') === projectId)
+      const { data: photoRowsForFiles, error: photoRowsError } = await supabase
+        .from('photos')
+        .select('global_photo_id')
+        .eq('project_id', projectId)
+
+      if (photoRowsError) throw new Error(photoRowsError.message)
+
+      const photoIds = (photoRowsForFiles ?? [])
         .map((photo) => String(photo.global_photo_id ?? ''))
         .filter(Boolean)
 
@@ -52,7 +58,7 @@ export async function GET() {
 
       return mapRowToProject({
         ...(row as Record<string, unknown>),
-        photo_count: photoIds.length,
+        photo_count: photoCount ?? 0,
         storage_used_bytes: sumProjectStorageUsedBytes(fileRows),
       })
     }))

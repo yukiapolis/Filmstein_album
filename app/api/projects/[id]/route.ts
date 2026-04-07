@@ -2,6 +2,9 @@ import { supabase } from '@/lib/supabase/server'
 import { mapRowToProject } from '@/lib/mapProject'
 import { mapRowToPhoto } from '@/lib/mapPhoto'
 import { getFirstVersionFiles, getFirstVersionNo, getLatestVersionFiles, getLatestVersionNo, groupPhotoFilesByVersion, type PhotoFileRow } from '@/lib/photoVersions'
+import { DeleteObjectCommand } from '@aws-sdk/client-s3'
+import { r2 } from '@/lib/r2/client'
+import fs from 'node:fs/promises'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
@@ -113,6 +116,8 @@ export async function PATCH(req: Request, context: RouteContext) {
     if (typeof body.description === 'string') updates.description = body.description.trim()
     if (typeof body.cover_url === 'string') updates.cover_url = body.cover_url.trim()
     if (body.ftp_ingest && typeof body.ftp_ingest === 'object') updates.ftp_ingest = body.ftp_ingest
+    if (body.project_assets && typeof body.project_assets === 'object') updates.project_assets = body.project_assets
+    if (body.visual_settings && typeof body.visual_settings === 'object') updates.visual_settings = body.visual_settings
 
     if (Object.keys(updates).length === 0) {
       return Response.json({ success: false, error: 'No fields to update' }, { status: 400 })
@@ -136,5 +141,69 @@ export async function PATCH(req: Request, context: RouteContext) {
     return Response.json({ success: true, data })
   } catch {
     return Response.json({ success: false, error: 'Server error' }, { status: 500 })
+  }
+}
+
+export async function DELETE(_req: Request, context: RouteContext) {
+  try {
+    const { id } = await context.params
+
+    const { data: fileRows, error: fileError } = await supabase
+      .from('photo_files')
+      .select('id, object_key, storage_provider')
+      .in('photo_id', (
+        await supabase.from('photos').select('global_photo_id').eq('project_id', id)
+      ).data?.map((row) => row.global_photo_id) ?? [])
+
+    if (fileError) {
+      return Response.json({ success: false, error: fileError.message }, { status: 500 })
+    }
+
+    for (const file of fileRows ?? []) {
+      if (!file.object_key) continue
+      if (file.storage_provider === 'r2' && process.env.R2_BUCKET_NAME) {
+        try {
+          await r2.send(new DeleteObjectCommand({ Bucket: process.env.R2_BUCKET_NAME, Key: file.object_key }))
+        } catch {}
+      } else if (file.storage_provider === 'local') {
+        try {
+          await fs.rm(file.object_key, { force: true })
+        } catch {}
+      }
+    }
+
+    const { data: projectRow } = await supabase
+      .from('projects')
+      .select('project_assets, cover_url')
+      .eq('id', id)
+      .maybeSingle()
+
+    const projectAssets = (projectRow?.project_assets ?? {}) as Record<string, { url?: string }>
+    const assetUrls = [projectRow?.cover_url, projectAssets.cover?.url, projectAssets.banner?.url, projectAssets.splash_poster?.url, projectAssets.loading_gif?.url, projectAssets.watermark_logo?.url].filter(Boolean) as string[]
+    const publicBase = (process.env.R2_PUBLIC_BASE_URL || process.env.NEXT_PUBLIC_PHOTO_PUBLIC_BASE_URL || '').replace(/\/+$/, '')
+    for (const url of assetUrls) {
+      if (process.env.R2_BUCKET_NAME && publicBase && url.startsWith(`${publicBase}/`)) {
+        const key = url.slice(publicBase.length + 1)
+        try {
+          await r2.send(new DeleteObjectCommand({ Bucket: process.env.R2_BUCKET_NAME, Key: key }))
+        } catch {}
+      }
+    }
+
+    await supabase.from('photo_files').delete().in('photo_id', (
+      await supabase.from('photos').select('global_photo_id').eq('project_id', id)
+    ).data?.map((row) => row.global_photo_id) ?? [])
+    await supabase.from('photos').delete().eq('project_id', id)
+    await supabase.from('folders').delete().eq('project_id', id)
+    await supabase.from('ftp_ingest_import_jobs').delete().eq('project_id', id)
+    const { error: deleteProjectError } = await supabase.from('projects').delete().eq('id', id)
+
+    if (deleteProjectError) {
+      return Response.json({ success: false, error: deleteProjectError.message }, { status: 500 })
+    }
+
+    return Response.json({ success: true })
+  } catch (error) {
+    return Response.json({ success: false, error: error instanceof Error ? error.message : 'Server error' }, { status: 500 })
   }
 }
