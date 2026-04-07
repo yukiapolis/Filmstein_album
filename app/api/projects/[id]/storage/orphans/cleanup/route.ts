@@ -15,7 +15,6 @@ export async function POST(req: Request, context: RouteContext) {
       r2_orphans?: { items?: CleanupItem[] }
       local_orphans?: { items?: CleanupItem[] }
       db_orphans?: { items?: CleanupItem[] }
-      zombie_photos?: { items?: CleanupItem[] }
     }
     const cleanTypes = Array.isArray(body?.cleanTypes) ? body.cleanTypes as string[] : []
 
@@ -56,24 +55,46 @@ export async function POST(req: Request, context: RouteContext) {
 
     if (cleanTypes.includes('db')) {
       for (const item of scanResult?.db_orphans?.items ?? []) {
+        if (item.reason.includes('logical photo exists without')) {
+          const { data: linkedFiles, error: linkedFilesError } = await supabase
+            .from('photo_files')
+            .select('id')
+            .eq('photo_id', item.path)
+
+          if (linkedFilesError) {
+            failedItems.push({ path: item.path, error: linkedFilesError.message })
+            continue
+          }
+
+          if ((linkedFiles ?? []).length > 0) {
+            const { error: deleteFilesError } = await supabase
+              .from('photo_files')
+              .delete()
+              .eq('photo_id', item.path)
+            if (deleteFilesError) {
+              failedItems.push({ path: item.path, error: deleteFilesError.message })
+              continue
+            }
+          }
+
+          const { error, count } = await supabase
+            .from('photos')
+            .delete({ count: 'exact' })
+            .eq('global_photo_id', item.path)
+          if (error) {
+            failedItems.push({ path: item.path, error: error.message })
+          } else if ((count ?? 0) > 0) {
+            deleted.push(item)
+          } else {
+            skippedCount++
+          }
+          continue
+        }
+
         const { error, count } = await supabase
           .from('photo_files')
           .delete({ count: 'exact' })
           .eq('object_key', item.path)
-        if (error) {
-          failedItems.push({ path: item.path, error: error.message })
-        } else if ((count ?? 0) > 0) {
-          deleted.push(item)
-        } else {
-          skippedCount++
-        }
-      }
-
-      for (const item of scanResult?.zombie_photos?.items ?? []) {
-        const { error, count } = await supabase
-          .from('photos')
-          .delete({ count: 'exact' })
-          .eq('global_photo_id', item.path)
         if (error) {
           failedItems.push({ path: item.path, error: error.message })
         } else if ((count ?? 0) > 0) {

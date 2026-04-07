@@ -8,7 +8,7 @@ const THIRTY_MINUTES_MS = 30 * 60 * 1000
 export type OrphanItem = {
   path: string
   size: number
-  sourceType: 'r2' | 'local' | 'db' | 'zombie-photo'
+  sourceType: 'r2' | 'local' | 'db'
   reason: string
 }
 
@@ -16,7 +16,6 @@ export type OrphanScanResult = {
   r2_orphans: { count: number; totalBytes: number; items: OrphanItem[] }
   local_orphans: { count: number; totalBytes: number; items: OrphanItem[] }
   db_orphans: { count: number; totalBytes: number; items: OrphanItem[] }
-  zombie_photos: { count: number; totalBytes: number; items: OrphanItem[] }
 }
 
 function summarize(items: OrphanItem[]) {
@@ -27,9 +26,24 @@ function summarize(items: OrphanItem[]) {
   }
 }
 
+function addProjectAssetReference(validR2: Set<string>, validLocal: Set<string>, value?: string | null) {
+  if (!value) return
+  if (/^https?:\/\//.test(value)) validR2.add(value)
+  else validLocal.add(value)
+}
+
 export async function scanProjectStorageOrphans(params: {
   projectId: string
-  project: { cover_url?: string | null }
+  project: {
+    cover_url?: string | null
+    project_assets?: {
+      cover?: { url?: string | null } | null
+      banner?: { url?: string | null } | null
+      splash_poster?: { url?: string | null } | null
+      loading_gif?: { url?: string | null } | null
+      watermark_logo?: { url?: string | null } | null
+    } | null
+  }
   photoFiles: Array<{ photo_id?: string | null; object_key: string | null; storage_provider: string | null; bucket_name: string | null; file_size_bytes?: number | null; created_at?: string | null; branch_type?: string | null }>
   photos?: Array<{ global_photo_id: string; original_file_id?: string | null; retouched_file_id?: string | null }>
 }) : Promise<OrphanScanResult> {
@@ -49,15 +63,16 @@ export async function scanProjectStorageOrphans(params: {
     }
   }
 
-  if (params.project.cover_url) {
-    if (/^https?:\/\//.test(params.project.cover_url)) validR2.add(params.project.cover_url)
-    else validLocal.add(params.project.cover_url)
-  }
+  addProjectAssetReference(validR2, validLocal, params.project.cover_url)
+  addProjectAssetReference(validR2, validLocal, params.project.project_assets?.cover?.url)
+  addProjectAssetReference(validR2, validLocal, params.project.project_assets?.banner?.url)
+  addProjectAssetReference(validR2, validLocal, params.project.project_assets?.splash_poster?.url)
+  addProjectAssetReference(validR2, validLocal, params.project.project_assets?.loading_gif?.url)
+  addProjectAssetReference(validR2, validLocal, params.project.project_assets?.watermark_logo?.url)
 
   const r2Orphans: OrphanItem[] = []
   const localOrphans: OrphanItem[] = []
   const dbOrphans: OrphanItem[] = []
-  const zombiePhotos: OrphanItem[] = []
 
   const bucket = process.env.R2_BUCKET_NAME
   const publicBase = (process.env.R2_PUBLIC_BASE_URL || process.env.NEXT_PUBLIC_PHOTO_PUBLIC_BASE_URL || '').replace(/\/+$/, '')
@@ -71,7 +86,7 @@ export async function scanProjectStorageOrphans(params: {
         const lastModified = item.LastModified ? new Date(item.LastModified).getTime() : 0
         if (lastModified && now - lastModified < THIRTY_MINUTES_MS) continue
         if (!validR2.has(fullUrl) && !validR2.has(item.Key)) {
-          r2Orphans.push({ path: item.Key, size: Number(item.Size || 0), sourceType: 'r2', reason: 'not referenced by project photo_files or project assets' })
+          r2Orphans.push({ path: item.Key, size: Number(item.Size || 0), sourceType: 'r2', reason: 'not referenced by project photo_files, cover_url, or project_assets' })
         }
       }
     }
@@ -90,7 +105,7 @@ export async function scanProjectStorageOrphans(params: {
           const stat = await fs.stat(full)
           if (now - stat.mtimeMs < THIRTY_MINUTES_MS) continue
           if (!validLocal.has(full)) {
-            localOrphans.push({ path: full, size: stat.size, sourceType: 'local', reason: 'not referenced by project photo_files or project assets' })
+            localOrphans.push({ path: full, size: stat.size, sourceType: 'local', reason: 'not referenced by project photo_files, cover_url, or project_assets' })
           }
         }
       }
@@ -119,15 +134,14 @@ export async function scanProjectStorageOrphans(params: {
 
   for (const photo of params.photos ?? []) {
     const photoFiles = filesByPhotoId.get(photo.global_photo_id) ?? []
-    const hasAnyFile = photoFiles.length > 0
     const hasRenderableFile = photoFiles.some((file) => file.branch_type === 'original' || file.branch_type === 'display' || file.branch_type === 'thumb')
     const hasDirectRef = Boolean(photo.original_file_id || photo.retouched_file_id)
 
-    if (!hasDirectRef && (!hasAnyFile || !hasRenderableFile)) {
-      zombiePhotos.push({
+    if (!hasDirectRef && !hasRenderableFile) {
+      dbOrphans.push({
         path: photo.global_photo_id,
         size: 0,
-        sourceType: 'zombie-photo',
+        sourceType: 'db',
         reason: 'logical photo exists without original/retouched refs and without any valid renderable photo_files',
       })
     }
@@ -137,6 +151,5 @@ export async function scanProjectStorageOrphans(params: {
     r2_orphans: summarize(r2Orphans),
     local_orphans: summarize(localOrphans),
     db_orphans: summarize(dbOrphans),
-    zombie_photos: summarize(zombiePhotos),
   }
 }
