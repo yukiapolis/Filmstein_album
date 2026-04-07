@@ -92,7 +92,10 @@ const PhotoCard = ({
           <img
             src={imageSrc}
             alt={photo.fileName}
-            className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.03]"
+            className={cn(
+              "h-full w-full transition-transform duration-500 group-hover:scale-[1.03]",
+              forceSquare ? 'object-cover' : 'object-contain bg-muted'
+            )}
             loading="lazy"
           />
         </div>

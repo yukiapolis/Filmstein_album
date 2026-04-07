@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { X, ChevronLeft, ChevronRight, Download, Heart, Trash2, Info } from "lucide-react";
+import { X, ChevronLeft, ChevronRight, Download, Heart, Trash2, Info, Loader2 } from "lucide-react";
 import type { Photo } from "@/data/mockData";
 import { Button } from "@/components/ui/button";
 import type { Project } from "@/data/mockData";
@@ -26,6 +26,9 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurren
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showInfo, setShowInfo] = useState(false);
   const [imageLoading, setImageLoading] = useState(true);
+  const [highResRequested, setHighResRequested] = useState(false);
+  const [highResLoaded, setHighResLoaded] = useState(false);
+  const [highResFailed, setHighResFailed] = useState(false);
 
   const prev = useCallback(() => setIndex((i) => (i > 0 ? i - 1 : photos.length - 1)), [photos.length]);
   const next = useCallback(() => setIndex((i) => (i < photos.length - 1 ? i + 1 : 0)), [photos.length]);
@@ -56,6 +59,9 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurren
 
   useEffect(() => {
     setImageLoading(true)
+    setHighResRequested(false)
+    setHighResLoaded(false)
+    setHighResFailed(false)
   }, [index, open])
 
   const openDownload = async (variant: "current" | "retouched-original" | "original" | "client-display" | "client-original") => {
@@ -215,18 +221,29 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurren
         <div className="relative flex max-h-[85vh] items-center justify-center overflow-hidden rounded-xl bg-black/40">
           {imageLoading && (
             <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/35 backdrop-blur-sm">
-              <div className="flex items-center gap-2 rounded-full bg-white/10 px-4 py-2 text-sm text-white">
-                <span className="h-2 w-2 animate-pulse rounded-full bg-white" />
-                Loading image…
+              <div className="flex items-center gap-3 rounded-full bg-white/10 px-4 py-2 text-sm text-white">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                {highResRequested && !highResLoaded ? 'Loading high resolution…' : 'Loading image…'}
               </div>
             </div>
           )}
           <img
-            src={clientDownloadMode ? `/api/photos/${photo.id}/client-render?mode=preview` : (photo.displayUrl || photo.file_url || photo.url)}
+            src={clientDownloadMode
+              ? `/api/photos/${photo.id}/client-render?mode=${highResRequested ? 'download' : 'preview'}`
+              : (highResRequested ? (photo.originalUrl || photo.retouchedOriginalUrl || photo.displayUrl || photo.file_url || photo.url) : (photo.displayUrl || photo.file_url || photo.url))}
             alt={photo.fileName}
             className="max-h-[85vh] max-w-full object-contain"
-            onLoad={() => setImageLoading(false)}
-            onError={() => setImageLoading(false)}
+            onLoad={() => {
+              setImageLoading(false)
+              if (highResRequested) setHighResLoaded(true)
+            }}
+            onError={() => {
+              setImageLoading(false)
+              if (highResRequested) {
+                setHighResFailed(true)
+                setHighResRequested(false)
+              }
+            }}
           />
           {clientDownloadMode && watermarkConfig.enabled && watermarkConfig.logoUrl && false && null}
           {photo.isPublished === false && (
@@ -243,9 +260,29 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurren
         <ChevronRight className="h-6 w-6" />
       </button>
 
-      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 text-sm text-white/70">
-        {index + 1} / {photos.length}
+      <div className="absolute bottom-4 left-1/2 flex -translate-x-1/2 items-center gap-3 text-sm text-white/70">
+        {!highResLoaded && (
+          <button
+            type="button"
+            className="rounded-full border border-white/15 bg-white/5 px-3 py-1 text-xs text-white/85 transition hover:bg-white/10"
+            onClick={(e) => {
+              e.stopPropagation()
+              setHighResRequested(true)
+              setImageLoading(true)
+              setHighResFailed(false)
+            }}
+          >
+            查看高清大图
+          </button>
+        )}
+        <span>{index + 1} / {photos.length}</span>
       </div>
+
+      {highResFailed && (
+        <div className="absolute bottom-14 left-1/2 z-20 -translate-x-1/2 rounded-full border border-white/10 bg-black/60 px-3 py-1 text-xs text-white/85 backdrop-blur">
+          高清图加载失败，已保留当前预览图
+        </div>
+      )}
 
       {showInfo && (
         <div className="absolute bottom-14 left-1/2 z-20 w-[min(92vw,520px)] -translate-x-1/2 rounded-xl border border-white/10 bg-black/65 px-4 py-3 text-white backdrop-blur">
