@@ -21,6 +21,7 @@ interface PhotoGridProps {
   hideStatusBadge?: boolean;
   hideMetaOverlay?: boolean;
   hideDownloadButton?: boolean;
+  clientDownloadMode?: boolean;
   gridClassName?: string;
   onDeletePhoto?: (photo: Photo) => Promise<void> | void;
   onDeleteAllVersions?: (photo: Photo) => Promise<void> | void;
@@ -38,6 +39,7 @@ const PhotoGrid = ({
   hideStatusBadge = false,
   hideMetaOverlay = false,
   hideDownloadButton = false,
+  clientDownloadMode = false,
   gridClassName,
   onDeletePhoto,
   onDeleteAllVersions,
@@ -135,6 +137,7 @@ const PhotoGrid = ({
             onDeleteCurrent={onDeletePhoto}
             onDeleteAllVersions={onDeleteAllVersions}
             onTogglePublish={onTogglePublish}
+            clientDownloadMode={clientDownloadMode}
           />
         )}
       </>
@@ -160,6 +163,7 @@ const PhotoGrid = ({
             hideStatusBadge={hideStatusBadge}
             hideMetaOverlay={hideMetaOverlay}
             hideDownloadButton={hideDownloadButton}
+            clientDownloadMode={clientDownloadMode}
           />
         ))}
       </div>
@@ -175,6 +179,7 @@ const PhotoGrid = ({
           onDeleteCurrent={onDeletePhoto}
           onDeleteAllVersions={onDeleteAllVersions}
           onTogglePublish={onTogglePublish}
+          clientDownloadMode={clientDownloadMode}
         />
       )}
     </>

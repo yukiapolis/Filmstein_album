@@ -16,6 +16,7 @@ interface PhotoCardProps {
   hideStatusBadge?: boolean;
   hideMetaOverlay?: boolean;
   hideDownloadButton?: boolean;
+  clientDownloadMode?: boolean;
 }
 
 const PhotoCard = ({
@@ -28,10 +29,11 @@ const PhotoCard = ({
   hideStatusBadge = false,
   hideMetaOverlay = false,
   hideDownloadButton = false,
+  clientDownloadMode = false,
 }: PhotoCardProps) => {
   const colorInfo =
     photo.colorLabel !== "none" ? colorLabelMap[photo.colorLabel] : null;
-  const isEdited = photo.photoStatus === "edited";
+  const isEdited = (photo.versionCount || 1) > 1;
   const [showDownloadMenu, setShowDownloadMenu] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
 
@@ -51,8 +53,10 @@ const PhotoCard = ({
     onSelect?.(!selected);
   };
 
-  const openDownload = async (variant: "display" | "original") => {
-    const url = `/api/photos/${photo.id}/download?variant=${variant}`;
+  const openDownload = async (variant: "current" | "retouched-original" | "original" | "client-display" | "client-original") => {
+    const url = clientDownloadMode
+      ? `/api/photos/${photo.id}/download?clientSafe=true&variant=${variant === 'client-original' ? 'client-original' : 'current'}`
+      : `/api/photos/${photo.id}/download?variant=${variant}`;
     const check = await fetch(url, { method: "HEAD" });
     if (!check.ok) {
       const body = await check.json().catch(() => ({}));
@@ -232,26 +236,65 @@ const PhotoCard = ({
           </button>
           {showDownloadMenu && (
             <div className="absolute right-0 top-8 z-50 min-w-40 rounded-lg border border-border bg-card p-1 shadow-lg">
-              <button
-                type="button"
-                className="block w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  void openDownload("display");
-                }}
-              >
-                下载当前版本
-              </button>
-              <button
-                type="button"
-                className="block w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  void openDownload("original");
-                }}
-              >
-                下载原图
-              </button>
+              {clientDownloadMode ? (
+                <>
+                  <button
+                    type="button"
+                    className="block w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void openDownload("client-display");
+                    }}
+                  >
+                    下载图片
+                  </button>
+                  <button
+                    type="button"
+                    className="block w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void openDownload("client-original");
+                    }}
+                  >
+                    下载大图
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    className="block w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void openDownload("current");
+                    }}
+                  >
+                    下载当前版本
+                  </button>
+                  {(photo.versionCount || 1) > 1 && (
+                    <button
+                      type="button"
+                      className="block w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void openDownload("retouched-original");
+                      }}
+                    >
+                      下载修图原图
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="block w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void openDownload("original");
+                    }}
+                  >
+                    下载最初原图
+                  </button>
+                </>
+              )}
             </div>
           )}
         </div>}

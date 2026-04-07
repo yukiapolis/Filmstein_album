@@ -13,9 +13,10 @@ interface PhotoPreviewModalProps {
   onDeleteCurrent?: (photo: Photo) => Promise<void> | void;
   onDeleteAllVersions?: (photo: Photo) => Promise<void> | void;
   onTogglePublish?: (photo: Photo, isPublished: boolean) => Promise<void> | void;
+  clientDownloadMode?: boolean;
 }
 
-const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurrent, onDeleteAllVersions, onTogglePublish }: PhotoPreviewModalProps) => {
+const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurrent, onDeleteAllVersions, onTogglePublish, clientDownloadMode = false }: PhotoPreviewModalProps) => {
   const [index, setIndex] = useState(initialIndex);
   const [showDownloadMenu, setShowDownloadMenu] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -40,11 +41,16 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurren
   const photo = photos[index] as Photo & {
     displayUrl?: string;
     originalUrl?: string;
+    retouchedOriginalUrl?: string;
     displayFileId?: string;
+    versionCount?: number;
+    latestVersionNo?: number;
   };
 
-  const openDownload = async (variant: "display" | "original") => {
-    const url = `/api/photos/${photo.id}/download?variant=${variant}`;
+  const openDownload = async (variant: "current" | "retouched-original" | "original" | "client-display" | "client-original") => {
+    const url = clientDownloadMode
+      ? `/api/photos/${photo.id}/download?clientSafe=true&variant=${variant === 'client-original' ? 'client-original' : 'current'}`
+      : `/api/photos/${photo.id}/download?variant=${variant}`;
     const check = await fetch(url, { method: "HEAD" });
     if (!check.ok) {
       const body = await check.json().catch(() => ({}));
@@ -79,7 +85,7 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurren
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90" onClick={onClose}>
       <div className="absolute left-4 top-4 z-10 flex items-center gap-2">
         <span className="inline-flex items-center rounded-md border border-border/80 bg-white/95 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground shadow-sm">
-          original
+          {(photo.versionCount || 1) > 1 ? 'retouched' : 'original'}
         </span>
         {photo.isPublished === false && (
           <span className="inline-flex items-center rounded-md bg-black/70 px-2 py-0.5 text-[10px] font-semibold text-white shadow-sm">
@@ -116,26 +122,65 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurren
           </Button>
           {showDownloadMenu && (
             <div className="absolute right-0 top-10 z-30 min-w-40 rounded-lg border border-border bg-card p-1 text-foreground shadow-lg">
-              <button
-                type="button"
-                className="block w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  void openDownload("display");
-                }}
-              >
-                下载当前版本
-              </button>
-              <button
-                type="button"
-                className="block w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  void openDownload("original");
-                }}
-              >
-                下载原图
-              </button>
+              {clientDownloadMode ? (
+                <>
+                  <button
+                    type="button"
+                    className="block w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void openDownload("client-display");
+                    }}
+                  >
+                    下载图片
+                  </button>
+                  <button
+                    type="button"
+                    className="block w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void openDownload("client-original");
+                    }}
+                  >
+                    下载大图
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    className="block w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void openDownload("current");
+                    }}
+                  >
+                    下载当前版本
+                  </button>
+                  {(photo.versionCount || 1) > 1 && (
+                    <button
+                      type="button"
+                      className="block w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void openDownload("retouched-original");
+                      }}
+                    >
+                      下载修图原图
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="block w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void openDownload("original");
+                    }}
+                  >
+                    下载最初原图
+                  </button>
+                </>
+              )}
             </div>
           )}
         </div>
@@ -183,7 +228,7 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurren
             <h3 className="text-base font-semibold">确认删除</h3>
             <p className="mt-2 text-sm text-muted-foreground">
               {onDeleteCurrent && onDeleteAllVersions
-                ? '你可以只删除当前修图版本，或删除全部版本与逻辑照片。'
+                ? '你可以删除该图片当前最新版，或删除整张图片及全部版本。'
                 : '这会删除当前图片的全部版本，并删除对应逻辑照片。此操作不可恢复。'}
             </p>
             <div className="mt-4 flex justify-end gap-2">
@@ -192,11 +237,11 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurren
               </Button>
               {onDeleteCurrent && onDeleteAllVersions && (
                 <Button type="button" variant="outline" onClick={() => void handleDelete('current')} disabled={deleting}>
-                  {deleting ? '删除中…' : '删除修图版本'}
+                  {deleting ? '删除中…' : '删除当前最新版'}
                 </Button>
               )}
               <Button type="button" variant="destructive" onClick={() => void handleDelete('all')} disabled={deleting}>
-                {deleting ? '删除中…' : '删除全部版本'}
+                {deleting ? '删除中…' : '删除整张图片'}
               </Button>
             </div>
           </div>

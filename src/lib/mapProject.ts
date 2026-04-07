@@ -66,5 +66,6 @@ export function mapRowToProject(row: Record<string, unknown>): Project {
     status: asProjectStatus(row.status),
     clientName,
     description,
-  };
+    ftp_ingest: typeof row.ftp_ingest === 'object' && row.ftp_ingest !== null ? row.ftp_ingest : undefined,
+  } as Project & { ftp_ingest?: Record<string, unknown> };
 }

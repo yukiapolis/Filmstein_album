@@ -170,7 +170,7 @@ const ClientGallery = ({
       const res = await fetch("/api/photos/download-zip", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ photoIds }),
+        body: JSON.stringify({ photoIds, clientSafe: true }),
       });
 
       if (!res.ok) {
@@ -293,6 +293,7 @@ const ClientGallery = ({
                   hideStatusBadge
                   hideMetaOverlay
                   hideDownloadButton
+                  clientDownloadMode
                   gridClassName="grid grid-cols-2 gap-2.5 sm:grid-cols-3 sm:gap-3 lg:grid-cols-4 lg:gap-4 xl:grid-cols-5 2xl:grid-cols-6"
                 />
               </section>
@@ -347,7 +348,7 @@ const ClientGallery = ({
                 ) : (
                   <>
                     <Download className="mr-1.5 h-3.5 w-3.5" />
-                    Download selected
+                    下载图片
                   </>
                 )}
               </Button>
@@ -363,7 +364,7 @@ const ClientGallery = ({
                   const res = await fetch("/api/photos/download-zip", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ photoIds }),
+                    body: JSON.stringify({ photoIds, clientSafe: true }),
                   });
 
                   if (!res.ok) {
@@ -397,7 +398,7 @@ const ClientGallery = ({
               ) : (
                 <>
                   <Download className="mr-1.5 h-3.5 w-3.5" />
-                  Download all
+                  下载全部图片
                 </>
               )}
             </Button>
@@ -533,6 +534,7 @@ const ClientGallery = ({
                 onToggleSelect={toggleSelect}
                 selectedIds={Array.from(selections)}
                 cardVariant="gallery"
+                clientDownloadMode
               />
             </div>
           </div>

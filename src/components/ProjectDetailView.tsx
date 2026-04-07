@@ -382,11 +382,10 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
   };
 
   const handleDeleteCurrentVersion = async (photo: Photo) => {
-    const displayFileId = (photo as Photo & { displayFileId?: string }).displayFileId;
-    const fileId = displayFileId || photo.retouchedFileId;
-    if (!fileId) return;
+    const versionNo = photo.latestVersionNo;
+    if (!versionNo) return;
 
-    const res = await fetch(`/api/photos/${photo.id}?mode=current-version&fileId=${encodeURIComponent(fileId)}`, {
+    const res = await fetch(`/api/photos/${photo.id}?mode=current-version&versionNo=${encodeURIComponent(String(versionNo))}`, {
       method: 'DELETE',
     });
     const body = await res.json();
@@ -409,7 +408,7 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
     }
   };
 
-  const handleBatchDeleteCurrentVersions = async () => {
+  const handleBatchDelete = async (mode: 'current-version' | 'all-versions') => {
     if (selectedPhotoIds.size === 0) return;
 
     const selectedPhotos = displayPhotos.filter((p) => selectedPhotoIds.has(p.id));
@@ -419,12 +418,19 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
 
     setDeleting(true);
     try {
+      const versionNoByPhotoId = Object.fromEntries(
+        selectedPhotos
+          .filter((photo) => typeof photo.latestVersionNo === 'number')
+          .map((photo) => [photo.id, photo.latestVersionNo as number])
+      );
+
       const res = await fetch('/api/photos', {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           photoIds,
-          mode: 'all-versions',
+          mode,
+          versionNoByPhotoId: mode === 'current-version' ? versionNoByPhotoId : undefined,
         }),
       });
       const body = await res.json();
@@ -995,7 +1001,7 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
           <div className="w-full max-w-md rounded-xl border border-border bg-card p-5 shadow-xl">
             <h3 className="text-base font-semibold text-foreground">确认删除</h3>
             <p className="mt-2 text-sm text-muted-foreground">
-              这会删除所选图片的全部版本，并删除对应逻辑照片。此操作不可恢复。
+              你可以删除所选图片的当前最新版，或删除整张图片及其全部版本。此操作不可恢复。
             </p>
             <div className="mt-4 flex justify-end gap-2">
               <Button type="button" variant="outline" onClick={() => setDeleteConfirmOpen(false)} disabled={deleting}>
@@ -1003,14 +1009,25 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
               </Button>
               <Button
                 type="button"
-                variant="destructive"
+                variant="outline"
                 onClick={async () => {
-                  await handleBatchDeleteCurrentVersions();
+                  await handleBatchDelete('current-version');
                   setDeleteConfirmOpen(false);
                 }}
                 disabled={deleting}
               >
-                {deleting ? '删除中…' : '确认删除'}
+                {deleting ? '删除中…' : '删除当前最新版'}
+              </Button>
+              <Button
+                type="button"
+                variant="destructive"
+                onClick={async () => {
+                  await handleBatchDelete('all-versions');
+                  setDeleteConfirmOpen(false);
+                }}
+                disabled={deleting}
+              >
+                {deleting ? '删除中…' : '删除整张图片'}
               </Button>
             </div>
           </div>

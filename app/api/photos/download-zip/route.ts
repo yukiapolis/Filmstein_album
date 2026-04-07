@@ -4,25 +4,17 @@ import { NextRequest } from "next/server";
 import JSZip from "jszip";
 import { createClient } from "@supabase/supabase-js";
 import { resolvePhotoPublicUrl } from "@/lib/resolvePhotoPublicUrl";
+import { getLatestVersionFiles, type PhotoFileRow } from '@/lib/photoVersions'
 
 const MAX_PHOTOS = 50;
 const BRANCH_TYPE_DISPLAY = 'display';
 
-type FileRow = {
-  id: string;
-  photo_id: string;
-  branch_type: string | null;
-  file_name: string | null;
-  original_file_name: string | null;
-  object_key: string | null;
-  storage_provider: string | null;
-  bucket_name: string | null;
-};
+type FileRow = PhotoFileRow;
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { photoIds } = body;
+    const { photoIds, clientSafe } = body;
 
     if (!Array.isArray(photoIds) || photoIds.length === 0) {
       return Response.json({ error: "photoIds is required and must be a non-empty array" }, { status: 400 });
@@ -42,10 +34,29 @@ export async function POST(request: NextRequest) {
 
     const supabase = createClient(supabaseUrl, supabaseKey);
 
+    let allowedPhotoIds = photoIds as string[];
+
+    if (clientSafe === true) {
+      const { data: publishedPhotos, error: publishedError } = await supabase
+        .from('photos')
+        .select('global_photo_id')
+        .in('global_photo_id', photoIds)
+        .eq('is_published', true);
+
+      if (publishedError) {
+        return Response.json({ error: publishedError.message }, { status: 500 });
+      }
+
+      allowedPhotoIds = (publishedPhotos ?? []).map((row) => row.global_photo_id);
+      if (allowedPhotoIds.length === 0) {
+        return Response.json({ error: 'No published photos available for client download' }, { status: 403 });
+      }
+    }
+
     const { data: files, error } = await supabase
       .from("photo_files")
-      .select("id, photo_id, branch_type, file_name, original_file_name, object_key, storage_provider, bucket_name")
-      .in("photo_id", photoIds)
+      .select("id, photo_id, branch_type, file_name, original_file_name, object_key, storage_provider, bucket_name, version_no, created_at")
+      .in("photo_id", allowedPhotoIds)
       .eq("branch_type", BRANCH_TYPE_DISPLAY);
 
     if (error) {
@@ -56,10 +67,31 @@ export async function POST(request: NextRequest) {
       return Response.json({ error: "No display files found for the given photo IDs" }, { status: 404 });
     }
 
+    const filesByPhotoId = new Map<string, FileRow[]>();
+    for (const file of files as FileRow[]) {
+      const list = filesByPhotoId.get(file.photo_id) ?? [];
+      list.push(file);
+      filesByPhotoId.set(file.photo_id, list);
+    }
+
+    const latestDisplayFiles: FileRow[] = [];
+    for (const photoId of allowedPhotoIds) {
+      const rows = filesByPhotoId.get(photoId) ?? [];
+      const latestVersion = getLatestVersionFiles(rows);
+      const displayFile = latestVersion?.byBranch.display;
+      if (displayFile) {
+        latestDisplayFiles.push(displayFile);
+      }
+    }
+
+    if (latestDisplayFiles.length === 0) {
+      return Response.json({ error: "No latest display files found for the given photo IDs" }, { status: 404 });
+    }
+
     const zip = new JSZip();
     let successCount = 0;
 
-    for (const file of files as FileRow[]) {
+    for (const file of latestDisplayFiles) {
       const src = resolvePhotoPublicUrl(file as unknown as Record<string, unknown>);
       if (!src) continue;
 
