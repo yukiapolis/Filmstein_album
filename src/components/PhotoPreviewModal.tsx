@@ -25,6 +25,7 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurren
   const [deleting, setDeleting] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showInfo, setShowInfo] = useState(false);
+  const [imageLoading, setImageLoading] = useState(true);
 
   const prev = useCallback(() => setIndex((i) => (i > 0 ? i - 1 : photos.length - 1)), [photos.length]);
   const next = useCallback(() => setIndex((i) => (i < photos.length - 1 ? i + 1 : 0)), [photos.length]);
@@ -52,6 +53,10 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurren
   };
 
   const watermarkConfig = getClientWatermarkConfig(project)
+
+  useEffect(() => {
+    setImageLoading(true)
+  }, [index, open])
 
   const openDownload = async (variant: "current" | "retouched-original" | "original" | "client-display" | "client-original") => {
     const url = clientDownloadMode
@@ -208,10 +213,20 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurren
 
       <div className="max-h-[85vh] w-[min(92vw,1200px)]" onClick={(e) => e.stopPropagation()}>
         <div className="relative flex max-h-[85vh] items-center justify-center overflow-hidden rounded-xl bg-black/40">
+          {imageLoading && (
+            <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/35 backdrop-blur-sm">
+              <div className="flex items-center gap-2 rounded-full bg-white/10 px-4 py-2 text-sm text-white">
+                <span className="h-2 w-2 animate-pulse rounded-full bg-white" />
+                Loading image…
+              </div>
+            </div>
+          )}
           <img
             src={clientDownloadMode ? `/api/photos/${photo.id}/client-render?mode=preview` : (photo.displayUrl || photo.file_url || photo.url)}
             alt={photo.fileName}
             className="max-h-[85vh] max-w-full object-contain"
+            onLoad={() => setImageLoading(false)}
+            onError={() => setImageLoading(false)}
           />
           {clientDownloadMode && watermarkConfig.enabled && watermarkConfig.logoUrl && false && null}
           {photo.isPublished === false && (

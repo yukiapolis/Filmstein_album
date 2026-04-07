@@ -51,11 +51,13 @@ function getHourBucket(value: string) {
 
 function formatTimelineLabel(value: string) {
   const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value || 'Unknown date'
+  if (Number.isNaN(date.getTime())) return value || 'Unknown time'
   return new Intl.DateTimeFormat('en-CA', {
     year: 'numeric',
     month: 'short',
     day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
   }).format(date)
 }
 
@@ -184,15 +186,6 @@ const ClientGallery = ({
     });
   }, [albumsForUi]);
 
-  const toggleExpand = (albumId: string) => {
-    setExpandedAlbums((prev) => {
-      const next = new Set(prev);
-      if (next.has(albumId)) next.delete(albumId);
-      else next.add(albumId);
-      return next;
-    });
-  };
-
   const [selections, setSelections] = useState<Set<string>>(
     new Set(photos.filter((p) => p.selected).map((p) => p.id)),
   );
@@ -226,18 +219,8 @@ const ClientGallery = ({
 
   const timelineGroups = useMemo<TimelineGroup[]>(() => groupPhotosForTimeline(filtered, sortDir), [filtered, sortDir])
 
-  const toggleSelect = (photoId: string, selected: boolean) => {
-    setSelections((prev) => {
-      const next = new Set(prev);
-      if (selected) next.add(photoId);
-      else next.delete(photoId);
-      return next;
-    });
-  };
-
   const downloadSelected = async () => {
     if (selections.size === 0) return;
-
     setDownloading(true);
     try {
       const photoIds = Array.from(selections);
@@ -246,12 +229,10 @@ const ClientGallery = ({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ photoIds, clientSafe: true }),
       });
-
       if (!res.ok) {
         const errBody = await res.json();
         throw new Error(errBody.error || "Download failed");
       }
-
       const blob = await res.blob();
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -290,28 +271,6 @@ const ClientGallery = ({
     setSortDir((d) => (d === "desc" ? "asc" : "desc"));
   };
 
-  const clearSelections = () => setSelections(new Set());
-
-  const allFilteredSelected =
-    filtered.length > 0 && filtered.every((p) => selections.has(p.id));
-  const someFilteredSelected = filtered.some((p) => selections.has(p.id));
-
-  const toggleSelectAll = () => {
-    if (allFilteredSelected) {
-      setSelections((prev) => {
-        const next = new Set(prev);
-        for (const p of filtered) next.delete(p.id);
-        return next;
-      });
-    } else {
-      setSelections((prev) => {
-        const next = new Set(prev);
-        for (const p of filtered) next.add(p.id);
-        return next;
-      });
-    }
-  };
-
   const cleanPreview = presentation === "preview";
   const showSidebar = !cleanPreview && viewMode !== "list";
 
@@ -338,14 +297,12 @@ const ClientGallery = ({
           {loading ? (
             <p className="py-12 text-center text-sm text-muted-foreground">Loading photos…</p>
           ) : error ? (
-            <p className="py-12 text-center text-sm text-destructive" role="alert">
-              {error}
-            </p>
+            <p className="py-12 text-center text-sm text-destructive" role="alert">{error}</p>
           ) : filtered.length === 0 ? (
             <EmptyState message="No published photos yet." />
           ) : (
-            <div className="space-y-5 sm:space-y-6">
-              <section className="space-y-4">
+            <div className="space-y-4 sm:space-y-5">
+              <section>
                 <div className="overflow-hidden rounded-2xl bg-muted shadow-sm">
                   <div className="aspect-[16/10] sm:aspect-[16/7] lg:aspect-[16/5]">
                     <img src={heroImage} alt={projectName} className="h-full w-full object-cover" />
@@ -357,45 +314,43 @@ const ClientGallery = ({
                 <div className="rounded-2xl border border-border bg-card p-4 shadow-sm sm:p-5 lg:p-6">
                   <div className="space-y-3">
                     <h1 className="text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">{projectName}</h1>
-                    {projectDescription ? (
-                      <p className="max-w-3xl text-sm leading-6 text-muted-foreground sm:text-base">
-                        {projectDescription}
-                      </p>
-                    ) : null}
+                    {projectDescription ? <p className="max-w-3xl text-sm leading-6 text-muted-foreground sm:text-base">{projectDescription}</p> : null}
                   </div>
                 </div>
               </section>
 
               <section className="space-y-4">
                 <div className="rounded-2xl border border-border bg-card p-3 shadow-sm sm:p-4">
-                  <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                    <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                    <div className="flex min-w-0 gap-2 overflow-x-auto pb-1">
                       <button
                         type="button"
-                        onClick={() => setGalleryMode('grid')}
-                        className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors ${galleryMode === 'grid' ? 'bg-primary text-primary-foreground' : 'bg-muted text-foreground hover:bg-accent'}`}
+                        onClick={() => setActiveAlbum('all')}
+                        className={`shrink-0 rounded-full px-3 py-2 text-sm transition-colors ${activeAlbum === 'all' ? 'bg-primary text-primary-foreground' : 'bg-muted text-foreground hover:bg-accent'}`}
                       >
-                        <LayoutGrid className="h-4 w-4" />
-                        Grid
+                        All Photos
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => setGalleryMode('masonry')}
-                        className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors ${galleryMode === 'masonry' ? 'bg-primary text-primary-foreground' : 'bg-muted text-foreground hover:bg-accent'}`}
-                      >
-                        <Columns2 className="h-4 w-4" />
-                        Masonry
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setGalleryMode('timeline')}
-                        className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors ${galleryMode === 'timeline' ? 'bg-primary text-primary-foreground' : 'bg-muted text-foreground hover:bg-accent'}`}
-                      >
-                        <Rows3 className="h-4 w-4" />
-                        Timeline
-                      </button>
+                      {albumsForUi.map((album) => (
+                        <button
+                          key={album.id}
+                          type="button"
+                          onClick={() => setActiveAlbum(album.id)}
+                          className={`shrink-0 rounded-full px-3 py-2 text-sm transition-colors ${activeAlbum === album.id ? 'bg-primary text-primary-foreground' : 'bg-muted text-foreground hover:bg-accent'}`}
+                        >
+                          {album.name}
+                        </button>
+                      ))}
                     </div>
-                    <div className="flex items-center gap-2 self-start md:self-auto">
+                    <div className="flex flex-wrap items-center gap-2 self-start lg:self-auto">
+                      <button type="button" onClick={() => setGalleryMode('grid')} className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors ${galleryMode === 'grid' ? 'bg-primary text-primary-foreground' : 'bg-muted text-foreground hover:bg-accent'}`}>
+                        <LayoutGrid className="h-4 w-4" /> Grid
+                      </button>
+                      <button type="button" onClick={() => setGalleryMode('masonry')} className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors ${galleryMode === 'masonry' ? 'bg-primary text-primary-foreground' : 'bg-muted text-foreground hover:bg-accent'}`}>
+                        <Columns2 className="h-4 w-4" /> Masonry
+                      </button>
+                      <button type="button" onClick={() => setGalleryMode('timeline')} className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors ${galleryMode === 'timeline' ? 'bg-primary text-primary-foreground' : 'bg-muted text-foreground hover:bg-accent'}`}>
+                        <Rows3 className="h-4 w-4" /> Timeline
+                      </button>
                       <Button type="button" variant="outline" size="sm" onClick={cycleSort}>
                         <ArrowUpDown className="mr-1.5 h-3.5 w-3.5" />
                         {sortDir === 'desc' ? 'Newest first' : 'Oldest first'}
@@ -411,18 +366,21 @@ const ClientGallery = ({
                         <div className="sticky top-2 z-10 inline-flex rounded-full bg-card px-3 py-1 text-sm font-medium text-foreground shadow-sm ring-1 ring-border">
                           {group.label}
                         </div>
-                        <PhotoGrid
-                          photos={group.photos}
-                          viewMode="grid"
-                          selectedIds={[]}
-                          cardVariant="gallery"
-                          hideStatusBadge
-                          hideMetaOverlay
-                          clientDownloadMode
-                          forceSquareCards
-                          project={project}
-                          gridClassName="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 lg:gap-4 xl:grid-cols-5"
-                        />
+                        <div className="border-l border-border/70 pl-4">
+                          <PhotoGrid
+                            photos={group.photos}
+                            viewMode="grid"
+                            selectedIds={[]}
+                            cardVariant="gallery"
+                            hideStatusBadge
+                            hideMetaOverlay
+                            hideDownloadButton
+                            clientDownloadMode
+                            forceSquareCards
+                            project={project}
+                            gridClassName="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 lg:gap-4 xl:grid-cols-5"
+                          />
+                        </div>
                       </section>
                     ))}
                   </div>
@@ -434,8 +392,9 @@ const ClientGallery = ({
                     cardVariant="gallery"
                     hideStatusBadge
                     hideMetaOverlay
+                    hideDownloadButton
                     clientDownloadMode
-                    forceSquareCards={galleryMode === 'grid'}
+                    forceSquareCards
                     project={project}
                     gridClassName={galleryMode === 'masonry'
                       ? 'mx-auto max-w-7xl columns-2 gap-3 space-y-3 sm:columns-3 lg:columns-4 xl:columns-5'
@@ -455,129 +414,66 @@ const ClientGallery = ({
       {!cleanPreview && <header className="border-b border-border bg-card">
         <div className="container flex h-14 items-center justify-between gap-4">
           <div className="flex min-w-0 flex-1 items-center gap-2 text-sm">
-            <Link
-              href="/"
-              className="shrink-0 text-muted-foreground transition-colors hover:text-foreground"
-            >
-              Projects
-            </Link>
+            <Link href="/" className="shrink-0 text-muted-foreground transition-colors hover:text-foreground">Projects</Link>
             <span className="text-muted-foreground">/</span>
             <span className="truncate font-medium text-foreground">{projectName}</span>
             {project?.status && <StatusBadge status={project.status} />}
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="h-9 w-9"
-              title="Refresh"
-              onClick={handleRefresh}
-            >
-              <RefreshCw className="h-4 w-4" />
+            <Button type="button" variant="ghost" size="icon" className="h-9 w-9" title="Refresh" onClick={handleRefresh}><RefreshCw className="h-4 w-4" /></Button>
+            <Button size="sm" variant="outline" onClick={downloadSelected} disabled={downloading || selections.size === 0}>
+              {downloading ? <><Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />Downloading…</> : <><Download className="mr-1.5 h-3.5 w-3.5" />下载图片</>}
             </Button>
-            <span className="hidden text-sm text-muted-foreground sm:inline">
-              {selections.size} selected
-            </span>
-            {selections.size > 0 && (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={downloadSelected}
-                disabled={downloading}
-              >
-                {downloading ? (
-                  <>
-                    <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                    Downloading…
-                  </>
-                ) : (
-                  <>
-                    <Download className="mr-1.5 h-3.5 w-3.5" />
-                    下载图片
-                  </>
-                )}
-              </Button>
-            )}
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={async () => {
-                if (filtered.length === 0) return;
-                setDownloadingAll(true);
-                try {
-                  const photoIds = filtered.map((p) => p.id);
-                  const res = await fetch("/api/photos/download-zip", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ photoIds, clientSafe: true }),
-                  });
-
-                  if (!res.ok) {
-                    const errBody = await res.json().catch(() => ({}));
-                    throw new Error(errBody.error || "Download failed");
-                  }
-
-                  const blob = await res.blob();
-                  const url = window.URL.createObjectURL(blob);
-                  const a = document.createElement("a");
-                  a.href = url;
-                  a.download = "photos.zip";
-                  document.body.appendChild(a);
-                  a.click();
-                  document.body.removeChild(a);
-                  window.URL.revokeObjectURL(url);
-                } catch (err) {
-                  console.error("Download all error:", err);
-                  alert(err instanceof Error ? err.message : "Download failed");
-                } finally {
-                  setDownloadingAll(false);
+            <Button size="sm" variant="outline" onClick={async () => {
+              if (filtered.length === 0) return;
+              setDownloadingAll(true);
+              try {
+                const photoIds = filtered.map((p) => p.id);
+                const res = await fetch("/api/photos/download-zip", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ photoIds, clientSafe: true }),
+                });
+                if (!res.ok) {
+                  const errBody = await res.json().catch(() => ({}));
+                  throw new Error(errBody.error || "Download failed");
                 }
-              }}
-              disabled={downloadingAll}
-            >
-              {downloadingAll ? (
-                <>
-                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                  …
-                </>
-              ) : (
-                <>
-                  <Download className="mr-1.5 h-3.5 w-3.5" />
-                  下载全部图片
-                </>
-              )}
+                const blob = await res.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = "photos.zip";
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                window.URL.revokeObjectURL(url);
+              } catch (err) {
+                console.error("Download all error:", err);
+                alert(err instanceof Error ? err.message : "Download failed");
+              } finally {
+                setDownloadingAll(false);
+              }
+            }} disabled={downloadingAll}>
+              {downloadingAll ? <><Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />…</> : <><Download className="mr-1.5 h-3.5 w-3.5" />下载全部图片</>}
             </Button>
           </div>
         </div>
       </header>}
 
       <main className="container py-6">
-        {loading ? (
-          <p className="py-12 text-center text-sm text-muted-foreground">Loading photos…</p>
-        ) : error ? (
-          <p className="py-12 text-center text-sm text-destructive" role="alert">
-            {error}
-          </p>
-        ) : filtered.length === 0 && activeAlbum !== "all" ? (
-          <EmptyState message="No photos in this album yet." />
-        ) : photos.length === 0 ? (
-          <EmptyState />
-        ) : (
+        {loading ? <p className="py-12 text-center text-sm text-muted-foreground">Loading photos…</p> : error ? <p className="py-12 text-center text-sm text-destructive" role="alert">{error}</p> : photos.length === 0 ? <EmptyState /> : (
           <div className="flex flex-col gap-6 lg:flex-row">
             {showSidebar && (
               <aside className="w-full shrink-0 space-y-4 lg:w-56">
                 <div className="rounded-xl border border-border bg-card p-3">
-                  <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                    Albums
-                  </h2>
-                  <AlbumTree
-                    albums={albumsForUi}
-                    activeAlbumId={activeAlbum}
-                    onSelect={setActiveAlbum}
-                    expandedIds={expandedAlbums}
-                    onToggle={toggleExpand}
-                  />
+                  <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Albums</h2>
+                  <AlbumTree albums={albumsForUi} activeAlbumId={activeAlbum} onSelect={setActiveAlbum} expandedIds={expandedAlbums} onToggle={(albumId) => {
+                    setExpandedAlbums((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(albumId)) next.delete(albumId); else next.add(albumId);
+                      return next;
+                    });
+                  }} />
                 </div>
               </aside>
             )}
@@ -587,30 +483,8 @@ const ClientGallery = ({
                 <>
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div className="flex items-center gap-1 rounded-lg border border-border p-1">
-                      <button
-                        type="button"
-                        title="Grid"
-                        onClick={() => setViewMode("grid")}
-                        className={`rounded p-1.5 transition-colors ${
-                          viewMode === "grid"
-                            ? "bg-primary text-primary-foreground"
-                            : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                        }`}
-                      >
-                        <LayoutGrid className="h-4 w-4" />
-                      </button>
-                      <button
-                        type="button"
-                        title="List"
-                        onClick={() => setViewMode("list")}
-                        className={`rounded p-1.5 transition-colors ${
-                          viewMode === "list"
-                            ? "bg-primary text-primary-foreground"
-                            : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                        }`}
-                      >
-                        <List className="h-4 w-4" />
-                      </button>
+                      <button type="button" title="Grid" onClick={() => setViewMode("grid")} className={`rounded p-1.5 transition-colors ${viewMode === "grid" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}><LayoutGrid className="h-4 w-4" /></button>
+                      <button type="button" title="List" onClick={() => setViewMode("list")} className={`rounded p-1.5 transition-colors ${viewMode === "list" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}><List className="h-4 w-4" /></button>
                     </div>
                   </div>
 
@@ -619,70 +493,15 @@ const ClientGallery = ({
                       <span className="text-sm font-semibold">{filtered.length} photos</span>
                       <div className="relative min-w-[160px] max-w-xs flex-1">
                         <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-                        <Input
-                          placeholder="Search…"
-                          value={searchQuery}
-                          onChange={(e) => setSearchQuery(e.target.value)}
-                          className="h-9 pl-8"
-                        />
+                        <Input placeholder="Search…" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="h-9 pl-8" />
                       </div>
                       <ColorFilterBar active={activeTag} onChange={setActiveTag} />
-                      <div className="ml-auto flex items-center gap-2">
-                        <Button type="button" variant="outline" size="sm" onClick={cycleSort}>
-                          <ArrowUpDown className="mr-1.5 h-3.5 w-3.5" />
-                          Sort
-                        </Button>
-                        <select
-                          value={sortKey}
-                          onChange={(e) => setSortKey(e.target.value as "date" | "name")}
-                          className="h-9 rounded-md border border-input bg-background px-2 text-xs"
-                        >
-                          <option value="date">Date</option>
-                          <option value="name">Name</option>
-                        </select>
-                      </div>
                     </div>
                   </div>
-
-                  {filtered.length > 0 && (
-                    selections.size > 0 ? (
-                      <div className="flex items-center gap-2 text-sm font-medium text-sky-600">
-                        {selections.size} photo{selections.size !== 1 ? "s" : ""} selected — individual selection active
-                        <button
-                          type="button"
-                          onClick={clearSelections}
-                          className="ml-1 text-xs underline underline-offset-2 hover:text-foreground"
-                        >
-                          Clear all
-                        </button>
-                      </div>
-                    ) : (
-                      <label className="flex cursor-pointer items-center gap-2 text-sm text-foreground hover:text-sky-600 transition-colors">
-                        <input
-                          type="checkbox"
-                          className="h-4 w-4 rounded border-input"
-                          checked={allFilteredSelected}
-                          ref={(el) => {
-                            if (el) el.indeterminate = someFilteredSelected && !allFilteredSelected;
-                          }}
-                          onChange={toggleSelectAll}
-                        />
-                        All files
-                      </label>
-                    )
-                  )}
                 </>
               )}
 
-              <PhotoGrid
-                photos={filtered}
-                viewMode={viewMode}
-                onToggleSelect={toggleSelect}
-                selectedIds={Array.from(selections)}
-                cardVariant="gallery"
-                clientDownloadMode
-                project={project}
-              />
+              <PhotoGrid photos={filtered} viewMode={viewMode} selectedIds={Array.from(selections)} cardVariant="gallery" clientDownloadMode project={project} />
             </div>
           </div>
         )}

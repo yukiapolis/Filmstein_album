@@ -84,6 +84,7 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
   const [shareOpen, setShareOpen] = useState(false);
   const [activeAlbum, setActiveAlbum] = useState("all");
   const [colorFilter, setColorFilter] = useState<ColorLabel | "all">("all");
+  const [publishFilter, setPublishFilter] = useState<"all" | "published" | "unpublished">("all");
   const [expandedAlbums, setExpandedAlbums] = useState<Set<string>>(new Set());
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
   const [folders, setFolders] = useState<FolderItem[]>([]);
@@ -221,8 +222,14 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
       list = list.filter((p) => p.colorLabel === colorFilter);
     }
 
+    if (publishFilter === "published") {
+      list = list.filter((p) => p.isPublished === true);
+    } else if (publishFilter === "unpublished") {
+      list = list.filter((p) => p.isPublished !== true);
+    }
+
     return list;
-  }, [activeAlbum, activeTab, colorFilter, photos, albumsForUi]);
+  }, [activeAlbum, activeTab, colorFilter, publishFilter, photos, albumsForUi]);
 
   const displayPhotos = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -697,6 +704,15 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <ColorFilterBar active={colorFilter} onChange={setColorFilter} />
+                  <select
+                    value={publishFilter}
+                    onChange={(e) => setPublishFilter(e.target.value as "all" | "published" | "unpublished")}
+                    className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground"
+                  >
+                    <option value="all">All status</option>
+                    <option value="published">Published</option>
+                    <option value="unpublished">Unpublished</option>
+                  </select>
                 </div>
                 <div className="ml-auto flex items-center gap-2">
                   <div className="flex items-center gap-1 rounded-lg border border-border p-1">

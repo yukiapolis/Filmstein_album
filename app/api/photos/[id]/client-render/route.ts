@@ -149,8 +149,8 @@ async function buildClientImage(request: NextRequest, context: RouteContext, hea
     const height = baseMeta.height || 1200
     const scale = Math.max(0.2, Number(watermark.scale ?? 1))
     const opacity = Math.min(1, Math.max(0, Number(watermark.opacity ?? 1)))
-    const offsetX = Number(watermark.offset_x ?? 0)
-    const offsetY = Number(watermark.offset_y ?? 0)
+    const offsetXRatio = Number(watermark.offset_x ?? 0) / 100
+    const offsetYRatio = Number(watermark.offset_y ?? 0) / 100
     const logoWidth = Math.max(80, Math.round(width * (mode === 'download' ? 0.14 : 0.12) * scale))
     const resizedLogo = await sharp(logoBuffer).resize({ width: logoWidth }).png().toBuffer()
     const resizedMeta = await sharp(resizedLogo).metadata()
@@ -158,21 +158,26 @@ async function buildClientImage(request: NextRequest, context: RouteContext, hea
     const wmHeight = resizedMeta.height || Math.round(logoWidth / 2)
     const position = String(watermark.position || 'bottom-right')
 
-    let left = Math.max(16, width - wmWidth - 24 + offsetX)
-    let top = Math.max(16, height - wmHeight - 24 + offsetY)
+    const marginX = Math.round(width * 0.035)
+    const marginY = Math.round(height * 0.035)
+    const offsetXPx = Math.round(width * offsetXRatio)
+    const offsetYPx = Math.round(height * offsetYRatio)
+
+    let left = Math.max(16, width - wmWidth - marginX + offsetXPx)
+    let top = Math.max(16, height - wmHeight - marginY + offsetYPx)
 
     if (position === 'top-left') {
-      left = 24 + offsetX
-      top = 24 + offsetY
+      left = marginX + offsetXPx
+      top = marginY + offsetYPx
     } else if (position === 'top-right') {
-      left = width - wmWidth - 24 + offsetX
-      top = 24 + offsetY
+      left = width - wmWidth - marginX + offsetXPx
+      top = marginY + offsetYPx
     } else if (position === 'bottom-left') {
-      left = 24 + offsetX
-      top = height - wmHeight - 24 + offsetY
+      left = marginX + offsetXPx
+      top = height - wmHeight - marginY + offsetYPx
     } else if (position === 'custom') {
-      left = Math.round(width / 2 - wmWidth / 2 + offsetX)
-      top = Math.round(height / 2 - wmHeight / 2 + offsetY)
+      left = Math.round(width / 2 - wmWidth / 2 + offsetXPx)
+      top = Math.round(height / 2 - wmHeight / 2 + offsetYPx)
     }
 
     const logoWithOpacity = await sharp(resizedLogo).ensureAlpha(opacity).png().toBuffer()
