@@ -116,6 +116,18 @@ const ClientGallery = ({
   const [splashCountdown, setSplashCountdown] = useState(0)
 
   useEffect(() => {
+    if (!splashVisible) return
+    const previousOverflow = document.body.style.overflow
+    const previousOverscroll = document.body.style.overscrollBehavior
+    document.body.style.overflow = 'hidden'
+    document.body.style.overscrollBehavior = 'none'
+    return () => {
+      document.body.style.overflow = previousOverflow
+      document.body.style.overscrollBehavior = previousOverscroll
+    }
+  }, [splashVisible])
+
+  useEffect(() => {
     if (!id) return;
 
     let cancelled = false;
@@ -310,7 +322,7 @@ const ClientGallery = ({
           </div>
         ) : null}
 
-        <main className="mx-auto w-full max-w-7xl px-0 py-4 sm:px-4 sm:py-6 lg:px-8 lg:py-10">
+        <main className="mx-auto w-full max-w-7xl px-0 py-2 sm:px-3 sm:py-4 lg:px-8 lg:py-10">
           {loading ? (
             <p className="py-12 text-center text-sm text-muted-foreground">Loading photos…</p>
           ) : error ? (
@@ -335,7 +347,7 @@ const ClientGallery = ({
               </section>
 
               <section className="space-y-4">
-                <div className="rounded-2xl border border-border bg-card p-3 shadow-sm sm:p-4">
+                <div className="rounded-2xl border border-border bg-card p-2.5 shadow-sm sm:p-3">
                   <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                     <div className="flex min-w-0 gap-2 overflow-x-auto pb-1">
                       <button
@@ -398,7 +410,7 @@ const ClientGallery = ({
                             clientDownloadMode
                             forceSquareCards
                             project={project}
-                            gridClassName="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 lg:gap-4 xl:grid-cols-5"
+                            gridClassName="grid grid-cols-2 gap-1.5 sm:grid-cols-3 sm:gap-2 lg:grid-cols-4 lg:gap-2.5 xl:grid-cols-5"
                           />
                         </div>
                       </section>
@@ -417,8 +429,8 @@ const ClientGallery = ({
                     forceSquareCards={galleryMode === 'grid'}
                     project={project}
                     gridClassName={galleryMode === 'masonry'
-                      ? 'mx-auto max-w-7xl columns-2 gap-3 space-y-3 sm:columns-3 lg:columns-4 xl:columns-5'
-                      : 'grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 lg:gap-4 xl:grid-cols-5 2xl:grid-cols-6'}
+                      ? 'mx-auto max-w-7xl columns-2 gap-1.5 space-y-1.5 sm:columns-3 sm:gap-2 sm:space-y-2 lg:columns-4 lg:gap-2.5 lg:space-y-2.5 xl:columns-5'
+                      : 'grid grid-cols-2 gap-1.5 sm:grid-cols-3 sm:gap-2 lg:grid-cols-4 lg:gap-2.5 xl:grid-cols-5 2xl:grid-cols-6'}
                   />
                 )}
               </section>

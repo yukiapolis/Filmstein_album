@@ -30,6 +30,18 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurren
   const [highResLoaded, setHighResLoaded] = useState(false);
   const [highResFailed, setHighResFailed] = useState(false);
 
+  useEffect(() => {
+    if (!open) return
+    const previousOverflow = document.body.style.overflow
+    const previousOverscroll = document.body.style.overscrollBehavior
+    document.body.style.overflow = 'hidden'
+    document.body.style.overscrollBehavior = 'none'
+    return () => {
+      document.body.style.overflow = previousOverflow
+      document.body.style.overscrollBehavior = previousOverscroll
+    }
+  }, [open])
+
   const prev = useCallback(() => setIndex((i) => (i > 0 ? i - 1 : photos.length - 1)), [photos.length]);
   const next = useCallback(() => setIndex((i) => (i < photos.length - 1 ? i + 1 : 0)), [photos.length]);
 
@@ -63,6 +75,14 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurren
     setHighResLoaded(false)
     setHighResFailed(false)
   }, [index, open])
+
+  const previewSrc = clientDownloadMode
+    ? `/api/photos/${photo.id}/client-render?mode=preview&ts=${photo.id}-${index}`
+    : (photo.displayUrl || photo.file_url || photo.url)
+
+  const highResSrc = clientDownloadMode
+    ? `/api/photos/${photo.id}/client-render?mode=download&ts=${photo.id}-${index}-hires`
+    : (photo.originalUrl || photo.retouchedOriginalUrl || photo.displayUrl || photo.file_url || photo.url)
 
   const openDownload = async (variant: "current" | "retouched-original" | "original" | "client-display" | "client-original") => {
     const url = clientDownloadMode
@@ -99,7 +119,7 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurren
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex min-h-[100dvh] items-center justify-center overflow-hidden bg-black/92" onClick={onClose}>
       <div className="absolute left-4 top-4 z-10 flex items-center gap-2">
         <span className="inline-flex items-center rounded-md border border-border/80 bg-white/95 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground shadow-sm">
           {(photo.versionCount || 1) > 1 ? 'retouched' : 'original'}
@@ -228,9 +248,7 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurren
             </div>
           )}
           <img
-            src={clientDownloadMode
-              ? `/api/photos/${photo.id}/client-render?mode=${highResRequested ? 'download' : 'preview'}`
-              : (highResRequested ? (photo.originalUrl || photo.retouchedOriginalUrl || photo.displayUrl || photo.file_url || photo.url) : (photo.displayUrl || photo.file_url || photo.url))}
+            src={highResRequested ? highResSrc : previewSrc}
             alt={photo.fileName}
             className="max-h-[85vh] max-w-full object-contain"
             onLoad={() => {
@@ -264,7 +282,8 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurren
         {!highResLoaded && (
           <button
             type="button"
-            className="rounded-full border border-white/15 bg-white/5 px-3 py-1 text-xs text-white/85 transition hover:bg-white/10"
+            className="rounded-full border border-white/15 bg-white/5 px-3 py-1 text-xs text-white/85 transition hover:bg-white/10 disabled:opacity-50"
+            disabled={highResRequested && imageLoading}
             onClick={(e) => {
               e.stopPropagation()
               setHighResRequested(true)
@@ -272,7 +291,7 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurren
               setHighResFailed(false)
             }}
           >
-            查看高清大图
+            {highResRequested && imageLoading ? '高清加载中…' : '查看高清大图'}
           </button>
         )}
         <span>{index + 1} / {photos.length}</span>
