@@ -119,7 +119,7 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurren
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex min-h-[100dvh] items-center justify-center overflow-hidden bg-black/92" onClick={onClose}>
+    <div className="fixed inset-0 z-[100] flex min-h-[100dvh] items-center justify-center overflow-hidden bg-black/92 backdrop-blur-sm" onClick={onClose}>
       <div className="absolute left-4 top-4 z-10 flex items-center gap-2">
         <span className="inline-flex items-center rounded-md border border-border/80 bg-white/95 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground shadow-sm">
           {(photo.versionCount || 1) > 1 ? 'retouched' : 'original'}
@@ -237,7 +237,7 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurren
         <ChevronLeft className="h-6 w-6" />
       </button>
 
-      <div className="max-h-[85vh] w-[min(92vw,1200px)]" onClick={(e) => e.stopPropagation()}>
+      <div className="max-h-[85dvh] w-[min(92vw,1200px)] transform-gpu" onClick={(e) => e.stopPropagation()}>
         <div className="relative flex max-h-[85vh] items-center justify-center overflow-hidden rounded-xl bg-black/40">
           {imageLoading && (
             <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/35 backdrop-blur-sm">

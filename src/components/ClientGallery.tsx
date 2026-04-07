@@ -322,7 +322,7 @@ const ClientGallery = ({
           </div>
         ) : null}
 
-        <main className="mx-auto w-full max-w-7xl px-0 py-2 sm:px-3 sm:py-4 lg:px-8 lg:py-10">
+        <main className="mx-auto w-full max-w-7xl bg-surface px-0 py-2 sm:px-3 sm:py-4 lg:px-8 lg:py-10">
           {loading ? (
             <p className="py-12 text-center text-sm text-muted-foreground">Loading photos…</p>
           ) : error ? (
@@ -331,7 +331,7 @@ const ClientGallery = ({
             <div className="space-y-4 sm:space-y-5">
               <section>
                 <div className="overflow-hidden bg-muted shadow-sm sm:rounded-2xl">
-                  <div className="aspect-[16/10] sm:aspect-[16/7] lg:aspect-[16/5]">
+                  <div className="aspect-[1500/844] sm:aspect-[1500/844] lg:aspect-[1500/844]">
                     <img src={heroImage} alt={projectName} className="h-full w-full object-cover" />
                   </div>
                 </div>

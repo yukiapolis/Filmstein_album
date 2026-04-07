@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Calendar, FolderOpen, HardDrive, Image as ImageIcon, ServerCog } from "lucide-react";
+import { Calendar, FolderOpen } from "lucide-react";
 import type { Project } from "@/data/mockData";
 import StatusBadge from "@/components/StatusBadge";
 import { Button } from "@/components/ui/button";
@@ -26,15 +26,6 @@ function formatCreatedAt(project: Project) {
   }).format(date)
 }
 
-function FtpBadge({ enabled }: { enabled: boolean }) {
-  return (
-    <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium ${enabled ? 'bg-emerald-50 text-emerald-700' : 'bg-muted text-muted-foreground'}`}>
-      <span className={`h-1.5 w-1.5 rounded-full ${enabled ? 'bg-emerald-500' : 'bg-muted-foreground/60'}`} />
-      {enabled ? 'On' : 'Off'}
-    </span>
-  )
-}
-
 export default function ProjectListRow({ project }: { project: Project }) {
   const ftpEnabled = Boolean(project.ftp_ingest?.enabled)
 
@@ -43,7 +34,7 @@ export default function ProjectListRow({ project }: { project: Project }) {
       <div className="flex flex-col gap-4 p-4 lg:flex-row lg:items-center lg:gap-6">
         <div className="flex min-w-0 flex-1 items-center gap-4">
           <div className="overflow-hidden rounded-lg border border-border bg-muted">
-            <img src={project.cover_url} alt={project.name} className="h-20 w-28 object-cover" />
+            <img src={project.cover_url} alt={project.name} className="h-20 w-20 object-cover" />
           </div>
 
           <div className="min-w-0 flex-1">
@@ -64,29 +55,17 @@ export default function ProjectListRow({ project }: { project: Project }) {
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:min-w-[420px] lg:flex-none">
-          <div className="rounded-lg bg-muted/40 px-3 py-2">
-            <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Photos</p>
-            <p className="mt-1 inline-flex items-center gap-1 text-sm font-medium text-foreground">
-              <ImageIcon className="h-3.5 w-3.5" />
-              {project.photoCount}
-            </p>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:min-w-[360px] lg:flex-none">
+          <div className="rounded-lg bg-muted/40 px-3 py-2 text-sm font-medium text-foreground">
+            {project.photoCount}
           </div>
 
-          <div className="rounded-lg bg-muted/40 px-3 py-2">
-            <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Storage</p>
-            <p className="mt-1 inline-flex items-center gap-1 text-sm font-medium text-foreground">
-              <HardDrive className="h-3.5 w-3.5" />
-              {formatStorage(project.storage_used_bytes)}
-            </p>
+          <div className="rounded-lg bg-muted/40 px-3 py-2 text-sm font-medium text-foreground">
+            {formatStorage(project.storage_used_bytes)}
           </div>
 
-          <div className="rounded-lg bg-muted/40 px-3 py-2">
-            <p className="text-[11px] uppercase tracking-wide text-muted-foreground">FTP</p>
-            <div className="mt-1 inline-flex items-center gap-1 text-sm font-medium text-foreground">
-              <ServerCog className="h-3.5 w-3.5" />
-              <FtpBadge enabled={ftpEnabled} />
-            </div>
+          <div className="rounded-lg bg-muted/40 px-3 py-2 text-sm font-medium text-foreground">
+            FTP {ftpEnabled ? 'On' : 'Off'}
           </div>
         </div>
 

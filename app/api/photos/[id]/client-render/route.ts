@@ -140,7 +140,26 @@ async function buildClientImage(request: NextRequest, context: RouteContext, hea
       fetch(logoUrl!),
     ])
 
-    if (!imageRes.ok) return Response.json({ error: 'Failed to fetch image source' }, { status: 502 })
+    if (!imageRes.ok) {
+      if (mode === 'download' && latestVersion?.byBranch.display) {
+        const displayUrl = resolvePhotoPublicUrl(latestVersion.byBranch.display as unknown as Record<string, unknown>)
+        if (displayUrl) {
+          const fallbackRes = await fetch(displayUrl)
+          if (fallbackRes.ok) {
+            const fallbackBuffer = Buffer.from(await fallbackRes.arrayBuffer())
+            return new Response(headOnly ? null : new Uint8Array(fallbackBuffer), {
+              headers: {
+                'Content-Type': fallbackRes.headers.get('content-type') || 'image/jpeg',
+                'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(`${photoRow.global_photo_id}-display-fallback.jpg`)}`,
+                'Cache-Control': 'public, max-age=300',
+                'X-Watermark-Cache': 'FALLBACK',
+              },
+            })
+          }
+        }
+      }
+      return Response.json({ error: 'Failed to fetch image source' }, { status: 502 })
+    }
     if (!logoRes.ok) return Response.json({ error: 'Failed to fetch watermark logo' }, { status: 502 })
 
     const [imageBuffer, logoBuffer] = await Promise.all([
