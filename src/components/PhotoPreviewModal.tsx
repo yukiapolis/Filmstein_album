@@ -275,7 +275,7 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurren
         <ChevronRight className="h-6 w-6" />
       </button>
 
-      <div className="absolute bottom-4 left-1/2 flex -translate-x-1/2 items-center gap-3 text-sm text-white/70">
+      <div className="absolute bottom-[max(1.5rem,env(safe-area-inset-bottom))] left-1/2 flex -translate-x-1/2 items-center gap-3 text-sm text-white/70">
         {!highResLoaded && (
           <button
             type="button"
@@ -295,8 +295,8 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurren
       </div>
 
       {highResFailed && (
-        <div className="absolute bottom-14 left-1/2 z-20 -translate-x-1/2 rounded-full border border-white/10 bg-black/60 px-3 py-1 text-xs text-white/85 backdrop-blur">
-          高清图加载失败，已保留当前预览图
+        <div className="absolute bottom-[calc(max(1.5rem,env(safe-area-inset-bottom))+2.5rem)] left-1/2 z-20 -translate-x-1/2 rounded-full border border-white/10 bg-black/60 px-3 py-1 text-xs text-white/85 backdrop-blur">
+          高清原图不可用，当前已是最高可用画质
         </div>
       )}
 

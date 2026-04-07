@@ -5,6 +5,7 @@ import sharp from 'sharp'
 import { createClient } from '@supabase/supabase-js'
 import { getLatestVersionFiles, type PhotoFileRow } from '@/lib/photoVersions'
 import { resolvePhotoPublicUrl } from '@/lib/resolvePhotoPublicUrl'
+import fs from 'node:fs/promises'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
@@ -39,8 +40,66 @@ function getCacheKey(input: {
   offsetY: number
   scale: number
   opacity: number
+  sourceKey?: string
 }) {
   return JSON.stringify(input)
+}
+
+async function loadPreferredImageSource(params: {
+  mode: 'preview' | 'download'
+  latestVersion: ReturnType<typeof getLatestVersionFiles>
+}) {
+  if (!params.latestVersion) {
+    return { buffer: null as Buffer | null, sourceKey: '', sourceType: 'none' as const, fallbackMessage: null as string | null }
+  }
+
+  if (params.mode === 'preview') {
+    const displayFile = params.latestVersion.byBranch.display
+    if (!displayFile) return { buffer: null, sourceKey: '', sourceType: 'none' as const, fallbackMessage: 'No display preview file found' }
+    const displayUrl = resolvePhotoPublicUrl(displayFile as unknown as Record<string, unknown>)
+    if (!displayUrl) return { buffer: null, sourceKey: '', sourceType: 'none' as const, fallbackMessage: 'Display preview source unavailable' }
+    const res = await fetch(displayUrl)
+    if (!res.ok) return { buffer: null, sourceKey: displayUrl, sourceType: 'display' as const, fallbackMessage: 'Failed to fetch display preview' }
+    return { buffer: Buffer.from(await res.arrayBuffer()), sourceKey: displayUrl, sourceType: 'display' as const, fallbackMessage: null }
+  }
+
+  const originalFile = params.latestVersion.byBranch.original
+  if (originalFile?.storage_provider === 'local' && originalFile.object_key) {
+    try {
+      const buffer = await fs.readFile(originalFile.object_key)
+      return { buffer, sourceKey: originalFile.object_key, sourceType: 'local-original' as const, fallbackMessage: null }
+    } catch {
+      // continue to fallback chain
+    }
+  }
+
+  if (originalFile) {
+    const originalUrl = resolvePhotoPublicUrl(originalFile as unknown as Record<string, unknown>)
+    if (originalUrl) {
+      const res = await fetch(originalUrl)
+      if (res.ok) {
+        return { buffer: Buffer.from(await res.arrayBuffer()), sourceKey: originalUrl, sourceType: 'remote-original' as const, fallbackMessage: null }
+      }
+    }
+  }
+
+  const displayFile = params.latestVersion.byBranch.display
+  if (displayFile) {
+    const displayUrl = resolvePhotoPublicUrl(displayFile as unknown as Record<string, unknown>)
+    if (displayUrl) {
+      const res = await fetch(displayUrl)
+      if (res.ok) {
+        return {
+          buffer: Buffer.from(await res.arrayBuffer()),
+          sourceKey: displayUrl,
+          sourceType: 'display-fallback' as const,
+          fallbackMessage: 'High-resolution original unavailable, using highest available display version',
+        }
+      }
+    }
+  }
+
+  return { buffer: null, sourceKey: '', sourceType: 'none' as const, fallbackMessage: 'High-resolution original unavailable, current preview is the highest available quality' }
 }
 
 async function buildClientImage(request: NextRequest, context: RouteContext, headOnly = false) {
@@ -80,20 +139,14 @@ async function buildClientImage(request: NextRequest, context: RouteContext, hea
     if (fileError) return Response.json({ error: fileError.message }, { status: 500 })
 
     const latestVersion = getLatestVersionFiles((fileRows ?? []) as PhotoFileRow[])
-    const targetFile = mode === 'download'
-      ? latestVersion?.byBranch.original ?? latestVersion?.byBranch.display ?? null
-      : latestVersion?.byBranch.display ?? null
+    if (!latestVersion) return Response.json({ error: 'No file found' }, { status: 404 })
 
-    if (mode === 'preview' && !targetFile) {
-      return Response.json({ error: 'No display preview file found' }, { status: 404 })
+    const source = await loadPreferredImageSource({ mode, latestVersion })
+    if (!source.buffer) {
+      return Response.json({ error: source.fallbackMessage || 'Image source unavailable' }, { status: 404 })
     }
 
-    if (!targetFile) return Response.json({ error: 'No file found' }, { status: 404 })
-
-    const versionNo = Number(targetFile.version_no ?? latestVersion?.versionNo ?? 1)
-    const imageUrl = resolvePhotoPublicUrl(targetFile as unknown as Record<string, unknown>)
-    if (!imageUrl) return Response.json({ error: 'Image source unavailable' }, { status: 404 })
-
+    const versionNo = Number(latestVersion.versionNo ?? 1)
     const cacheKey = getCacheKey({
       photoId: id,
       mode,
@@ -104,6 +157,7 @@ async function buildClientImage(request: NextRequest, context: RouteContext, hea
       offsetY: Number(watermark.offset_y ?? 0),
       scale: Number(watermark.scale ?? 1),
       opacity: Number(watermark.opacity ?? 1),
+      sourceKey: source.sourceKey,
     })
 
     const cached = watermarkedImageCache.get(cacheKey)
@@ -116,58 +170,32 @@ async function buildClientImage(request: NextRequest, context: RouteContext, hea
             : `inline; filename*=UTF-8''${encodeURIComponent(cached.filename)}`,
           'Cache-Control': 'public, max-age=600',
           'X-Watermark-Cache': 'HIT',
+          'X-Image-Source': source.sourceType,
+          ...(source.fallbackMessage ? { 'X-Image-Fallback': source.fallbackMessage } : {}),
         },
       })
     }
 
     if (!watermarkEnabled) {
-      const upstream = await fetch(imageUrl)
-      if (!upstream.ok) return Response.json({ error: 'Failed to fetch image source' }, { status: 502 })
-      return new Response(headOnly ? null : upstream.body, {
+      return new Response(headOnly ? null : new Uint8Array(source.buffer), {
         headers: {
-          'Content-Type': upstream.headers.get('content-type') || 'image/jpeg',
+          'Content-Type': 'image/jpeg',
           'Content-Disposition': mode === 'download'
             ? `attachment; filename*=UTF-8''${encodeURIComponent(`${id}-${mode}.jpg`)}`
             : `inline; filename*=UTF-8''${encodeURIComponent(`${id}-${mode}.jpg`)}`,
           'Cache-Control': 'public, max-age=300',
           'X-Watermark-Cache': 'BYPASS',
+          'X-Image-Source': source.sourceType,
+          ...(source.fallbackMessage ? { 'X-Image-Fallback': source.fallbackMessage } : {}),
         },
       })
     }
 
-    const [imageRes, logoRes] = await Promise.all([
-      fetch(imageUrl),
-      fetch(logoUrl!),
-    ])
-
-    if (!imageRes.ok) {
-      if (mode === 'download' && latestVersion?.byBranch.display) {
-        const displayUrl = resolvePhotoPublicUrl(latestVersion.byBranch.display as unknown as Record<string, unknown>)
-        if (displayUrl) {
-          const fallbackRes = await fetch(displayUrl)
-          if (fallbackRes.ok) {
-            const fallbackBuffer = Buffer.from(await fallbackRes.arrayBuffer())
-            return new Response(headOnly ? null : new Uint8Array(fallbackBuffer), {
-              headers: {
-                'Content-Type': fallbackRes.headers.get('content-type') || 'image/jpeg',
-                'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(`${photoRow.global_photo_id}-display-fallback.jpg`)}`,
-                'Cache-Control': 'public, max-age=300',
-                'X-Watermark-Cache': 'FALLBACK',
-              },
-            })
-          }
-        }
-      }
-      return Response.json({ error: 'Failed to fetch image source' }, { status: 502 })
-    }
+    const logoRes = await fetch(logoUrl!)
     if (!logoRes.ok) return Response.json({ error: 'Failed to fetch watermark logo' }, { status: 502 })
+    const logoBuffer = Buffer.from(await logoRes.arrayBuffer())
 
-    const [imageBuffer, logoBuffer] = await Promise.all([
-      imageRes.arrayBuffer().then((buffer) => Buffer.from(buffer)),
-      logoRes.arrayBuffer().then((buffer) => Buffer.from(buffer)),
-    ])
-
-    const baseMeta = await sharp(imageBuffer).metadata()
+    const baseMeta = await sharp(source.buffer).metadata()
     const width = baseMeta.width || 1600
     const height = baseMeta.height || 1200
     const scale = Math.max(0.2, Number(watermark.scale ?? 1))
@@ -205,7 +233,7 @@ async function buildClientImage(request: NextRequest, context: RouteContext, hea
     }
 
     const logoWithOpacity = await sharp(resizedLogo).ensureAlpha(opacity).png().toBuffer()
-    const outputBuffer = Buffer.from(await sharp(imageBuffer)
+    const outputBuffer = Buffer.from(await sharp(source.buffer)
       .composite([{ input: logoWithOpacity, left: Math.max(0, left), top: Math.max(0, top), blend: 'over' }])
       .jpeg({ quality: mode === 'download' ? 92 : 84, mozjpeg: true })
       .toBuffer())
@@ -226,6 +254,8 @@ async function buildClientImage(request: NextRequest, context: RouteContext, hea
           : `inline; filename*=UTF-8''${encodeURIComponent(filename)}`,
         'Cache-Control': 'public, max-age=600',
         'X-Watermark-Cache': 'MISS',
+        'X-Image-Source': source.sourceType,
+        ...(source.fallbackMessage ? { 'X-Image-Fallback': source.fallbackMessage } : {}),
       },
     })
   } catch (error) {
