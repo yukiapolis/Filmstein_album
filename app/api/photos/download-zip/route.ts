@@ -90,9 +90,12 @@ export async function POST(request: NextRequest) {
 
     const zip = new JSZip();
     let successCount = 0;
+    const origin = request.nextUrl.origin;
 
     for (const file of latestDisplayFiles) {
-      const src = resolvePhotoPublicUrl(file as unknown as Record<string, unknown>);
+      const src = clientSafe === true
+        ? `${origin}/api/photos/${file.photo_id}/client-render?mode=download`
+        : resolvePhotoPublicUrl(file as unknown as Record<string, unknown>);
       if (!src) continue;
 
       try {

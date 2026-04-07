@@ -17,6 +17,7 @@ interface PhotoCardProps {
   hideMetaOverlay?: boolean;
   hideDownloadButton?: boolean;
   clientDownloadMode?: boolean;
+  forceSquare?: boolean;
 }
 
 const PhotoCard = ({
@@ -30,6 +31,7 @@ const PhotoCard = ({
   hideMetaOverlay = false,
   hideDownloadButton = false,
   clientDownloadMode = false,
+  forceSquare = false,
 }: PhotoCardProps) => {
   const colorInfo =
     photo.colorLabel !== "none" ? colorLabelMap[photo.colorLabel] : null;
@@ -55,7 +57,7 @@ const PhotoCard = ({
 
   const openDownload = async (variant: "current" | "retouched-original" | "original" | "client-display" | "client-original") => {
     const url = clientDownloadMode
-      ? `/api/photos/${photo.id}/download?clientSafe=true&variant=${variant === 'client-original' ? 'client-original' : 'current'}`
+      ? `/api/photos/${photo.id}/client-render?mode=download`
       : `/api/photos/${photo.id}/download?variant=${variant}`;
     const check = await fetch(url, { method: "HEAD" });
     if (!check.ok) {
@@ -146,7 +148,7 @@ const PhotoCard = ({
         selected ? "ring-2 ring-sky-500/70 shadow-md" : "hover:shadow-md",
       )}
     >
-      <div className="group relative aspect-[4/3] cursor-pointer overflow-hidden rounded-t-xl bg-muted" onClick={onClick}>
+      <div className={cn("group relative cursor-pointer overflow-hidden rounded-t-xl bg-muted", forceSquare ? "aspect-square" : "aspect-[4/3]")} onClick={onClick}>
         <img
           src={imageSrc}
           alt={photo.fileName}
@@ -246,7 +248,7 @@ const PhotoCard = ({
                       void openDownload("client-display");
                     }}
                   >
-                    下载图片
+                    下载带水印图片
                   </button>
                   <button
                     type="button"
@@ -256,7 +258,7 @@ const PhotoCard = ({
                       void openDownload("client-original");
                     }}
                   >
-                    下载大图
+                    下载带水印大图
                   </button>
                 </>
               ) : (

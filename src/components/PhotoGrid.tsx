@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import type { Photo, Album } from "@/data/mockData";
+import type { Photo, Album, Project } from "@/data/mockData";
 import PhotoCard from "@/components/PhotoCard";
 import PhotoPreviewModal from "@/components/PhotoPreviewModal";
 import EmptyPhotosState from "@/components/EmptyPhotosState";
@@ -26,6 +26,8 @@ interface PhotoGridProps {
   onDeletePhoto?: (photo: Photo) => Promise<void> | void;
   onDeleteAllVersions?: (photo: Photo) => Promise<void> | void;
   onTogglePublish?: (photo: Photo, isPublished: boolean) => Promise<void> | void;
+  forceSquareCards?: boolean;
+  project?: Project | null;
 }
 
 const PhotoGrid = ({
@@ -44,6 +46,8 @@ const PhotoGrid = ({
   onDeletePhoto,
   onDeleteAllVersions,
   onTogglePublish,
+  forceSquareCards = false,
+  project = null,
 }: PhotoGridProps) => {
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
 
@@ -138,6 +142,7 @@ const PhotoGrid = ({
             onDeleteAllVersions={onDeleteAllVersions}
             onTogglePublish={onTogglePublish}
             clientDownloadMode={clientDownloadMode}
+            project={project}
           />
         )}
       </>
@@ -164,6 +169,7 @@ const PhotoGrid = ({
             hideMetaOverlay={hideMetaOverlay}
             hideDownloadButton={hideDownloadButton}
             clientDownloadMode={clientDownloadMode}
+            forceSquare={forceSquareCards}
           />
         ))}
       </div>
@@ -180,6 +186,7 @@ const PhotoGrid = ({
           onDeleteAllVersions={onDeleteAllVersions}
           onTogglePublish={onTogglePublish}
           clientDownloadMode={clientDownloadMode}
+          project={project}
         />
       )}
     </>

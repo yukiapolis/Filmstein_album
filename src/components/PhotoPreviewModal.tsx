@@ -4,6 +4,8 @@ import { useState, useEffect, useCallback } from "react";
 import { X, ChevronLeft, ChevronRight, Download, Heart, Trash2 } from "lucide-react";
 import type { Photo } from "@/data/mockData";
 import { Button } from "@/components/ui/button";
+import type { Project } from "@/data/mockData";
+import { getClientWatermarkConfig } from "@/lib/clientWatermark";
 
 interface PhotoPreviewModalProps {
   photos: Photo[];
@@ -14,9 +16,10 @@ interface PhotoPreviewModalProps {
   onDeleteAllVersions?: (photo: Photo) => Promise<void> | void;
   onTogglePublish?: (photo: Photo, isPublished: boolean) => Promise<void> | void;
   clientDownloadMode?: boolean;
+  project?: Project | null;
 }
 
-const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurrent, onDeleteAllVersions, onTogglePublish, clientDownloadMode = false }: PhotoPreviewModalProps) => {
+const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurrent, onDeleteAllVersions, onTogglePublish, clientDownloadMode = false, project = null }: PhotoPreviewModalProps) => {
   const [index, setIndex] = useState(initialIndex);
   const [showDownloadMenu, setShowDownloadMenu] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -47,9 +50,11 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurren
     latestVersionNo?: number;
   };
 
+  const watermarkConfig = getClientWatermarkConfig(project)
+
   const openDownload = async (variant: "current" | "retouched-original" | "original" | "client-display" | "client-original") => {
     const url = clientDownloadMode
-      ? `/api/photos/${photo.id}/download?clientSafe=true&variant=${variant === 'client-original' ? 'client-original' : 'current'}`
+      ? `/api/photos/${photo.id}/client-render?mode=${variant === 'client-original' ? 'download' : 'download'}`
       : `/api/photos/${photo.id}/download?variant=${variant}`;
     const check = await fetch(url, { method: "HEAD" });
     if (!check.ok) {
@@ -132,7 +137,7 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurren
                       void openDownload("client-display");
                     }}
                   >
-                    下载图片
+                    下载带水印图片
                   </button>
                   <button
                     type="button"
@@ -142,7 +147,7 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurren
                       void openDownload("client-original");
                     }}
                   >
-                    下载大图
+                    下载带水印大图
                   </button>
                 </>
               ) : (
@@ -197,13 +202,14 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurren
         <ChevronLeft className="h-6 w-6" />
       </button>
 
-      <div className="max-h-[85vh] max-w-[85vw]" onClick={(e) => e.stopPropagation()}>
-        <div className="relative">
+      <div className="max-h-[85vh] w-[min(92vw,1200px)]" onClick={(e) => e.stopPropagation()}>
+        <div className="relative flex max-h-[85vh] items-center justify-center overflow-hidden rounded-xl bg-black/40">
           <img
-            src={photo.displayUrl || photo.file_url || photo.url}
+            src={clientDownloadMode ? `/api/photos/${photo.id}/client-render?mode=preview` : (photo.displayUrl || photo.file_url || photo.url)}
             alt={photo.fileName}
-            className="max-h-[85vh] max-w-[85vw] object-contain"
+            className="max-h-[85vh] max-w-full object-contain"
           />
+          {clientDownloadMode && watermarkConfig.enabled && watermarkConfig.logoUrl && false && null}
           {photo.isPublished === false && (
             <div className="absolute inset-0 bg-black/20 pointer-events-none" />
           )}

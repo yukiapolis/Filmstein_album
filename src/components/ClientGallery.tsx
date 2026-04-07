@@ -21,6 +21,7 @@ import type { ColorLabel } from "@/data/mockData";
 import { buildAlbumsFromPhotos } from "@/lib/albumsFromPhotos";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { getClientHeroImage } from "@/lib/clientWatermark";
 
 const EmptyState = ({ message }: { message?: string }) => (
   <div className="flex flex-col items-center justify-center py-20 text-center">
@@ -96,6 +97,8 @@ const ClientGallery = ({
   }, [id]);
 
   const projectName = project?.name ?? (id ? `Project ${id}` : "Project");
+  const projectDescription = project?.description?.trim() || "";
+  const heroImage = getClientHeroImage(project);
 
   const albumsForUi = useMemo(
     () => buildAlbumsFromPhotos(photos, folders),
@@ -257,30 +260,25 @@ const ClientGallery = ({
             <div className="space-y-6 sm:space-y-8">
               <section className="space-y-5 px-1 pt-2 sm:px-2">
                 <div className="relative overflow-hidden rounded-3xl bg-muted shadow-sm">
-                  <div className="aspect-[16/9] sm:aspect-[16/7] lg:aspect-[16/5]">
+                  <div className="aspect-[16/10] sm:aspect-[16/7] lg:aspect-[16/5]">
                     <img
-                      src={project?.cover_url || "/default-cover.svg"}
+                      src={heroImage}
                       alt={projectName}
                       className="h-full w-full object-cover"
                     />
                   </div>
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/20 to-black/5" />
-                  <div className="absolute inset-x-0 bottom-0 p-5 sm:p-7 lg:p-8">
-                    <div className="mx-auto max-w-5xl">
-                      <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-white/75">
-                        Preview Gallery
-                      </p>
-                      <h1 className="mt-3 text-3xl font-semibold tracking-tight text-white drop-shadow-sm sm:text-4xl lg:text-5xl">
-                        {projectName}
-                      </h1>
-                      <p className="mt-3 max-w-2xl text-sm leading-6 text-white/80 sm:text-base">
-                        Published highlights, presented in a clean gallery made for desktop review and mobile sharing.
-                      </p>
-                      <div className="mt-4 inline-flex items-center rounded-full border border-white/20 bg-black/25 px-4 py-1.5 text-sm text-white/85 backdrop-blur">
-                        {filtered.length} published photos
-                      </div>
-                    </div>
-                  </div>
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/35 via-black/10 to-transparent" />
+                </div>
+              </section>
+
+              <section className="mx-auto w-full max-w-5xl px-1 sm:px-2">
+                <div className="rounded-2xl border border-border bg-card p-5 shadow-sm sm:p-6">
+                  <h1 className="text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">{projectName}</h1>
+                  {projectDescription ? (
+                    <p className="mt-3 max-w-3xl text-sm leading-6 text-muted-foreground sm:text-base">
+                      {projectDescription}
+                    </p>
+                  ) : null}
                 </div>
               </section>
 
@@ -289,12 +287,13 @@ const ClientGallery = ({
                   photos={filtered}
                   viewMode="grid"
                   selectedIds={[]}
-                  cardVariant="overlay"
+                  cardVariant="gallery"
                   hideStatusBadge
                   hideMetaOverlay
-                  hideDownloadButton
                   clientDownloadMode
-                  gridClassName="grid grid-cols-2 gap-2.5 sm:grid-cols-3 sm:gap-3 lg:grid-cols-4 lg:gap-4 xl:grid-cols-5 2xl:grid-cols-6"
+                  forceSquareCards
+                  project={project}
+                  gridClassName="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 lg:gap-4 xl:grid-cols-5 2xl:grid-cols-6"
                 />
               </section>
             </div>
@@ -535,6 +534,7 @@ const ClientGallery = ({
                 selectedIds={Array.from(selections)}
                 cardVariant="gallery"
                 clientDownloadMode
+                project={project}
               />
             </div>
           </div>
