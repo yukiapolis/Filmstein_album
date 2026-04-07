@@ -5,7 +5,7 @@ import { r2 } from '@/lib/r2/client'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
-type CleanupItem = { path: string; size: number; sourceType: 'r2' | 'local' | 'db'; reason: string }
+type CleanupItem = { path: string; size: number; sourceType: 'r2' | 'local' | 'db' | 'zombie-photo'; reason: string }
 
 export async function POST(req: Request, context: RouteContext) {
   try {
@@ -15,6 +15,7 @@ export async function POST(req: Request, context: RouteContext) {
       r2_orphans?: { items?: CleanupItem[] }
       local_orphans?: { items?: CleanupItem[] }
       db_orphans?: { items?: CleanupItem[] }
+      zombie_photos?: { items?: CleanupItem[] }
     }
     const cleanTypes = Array.isArray(body?.cleanTypes) ? body.cleanTypes as string[] : []
 
@@ -59,6 +60,20 @@ export async function POST(req: Request, context: RouteContext) {
           .from('photo_files')
           .delete({ count: 'exact' })
           .eq('object_key', item.path)
+        if (error) {
+          failedItems.push({ path: item.path, error: error.message })
+        } else if ((count ?? 0) > 0) {
+          deleted.push(item)
+        } else {
+          skippedCount++
+        }
+      }
+
+      for (const item of scanResult?.zombie_photos?.items ?? []) {
+        const { error, count } = await supabase
+          .from('photos')
+          .delete({ count: 'exact' })
+          .eq('global_photo_id', item.path)
         if (error) {
           failedItems.push({ path: item.path, error: error.message })
         } else if ((count ?? 0) > 0) {

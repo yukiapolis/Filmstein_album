@@ -8,7 +8,7 @@ const THIRTY_MINUTES_MS = 30 * 60 * 1000
 export type OrphanItem = {
   path: string
   size: number
-  sourceType: 'r2' | 'local' | 'db'
+  sourceType: 'r2' | 'local' | 'db' | 'zombie-photo'
   reason: string
 }
 
@@ -16,6 +16,7 @@ export type OrphanScanResult = {
   r2_orphans: { count: number; totalBytes: number; items: OrphanItem[] }
   local_orphans: { count: number; totalBytes: number; items: OrphanItem[] }
   db_orphans: { count: number; totalBytes: number; items: OrphanItem[] }
+  zombie_photos: { count: number; totalBytes: number; items: OrphanItem[] }
 }
 
 function summarize(items: OrphanItem[]) {
@@ -29,16 +30,23 @@ function summarize(items: OrphanItem[]) {
 export async function scanProjectStorageOrphans(params: {
   projectId: string
   project: { cover_url?: string | null }
-  photoFiles: Array<{ object_key: string | null; storage_provider: string | null; bucket_name: string | null; file_size_bytes?: number | null; created_at?: string | null }>
+  photoFiles: Array<{ photo_id?: string | null; object_key: string | null; storage_provider: string | null; bucket_name: string | null; file_size_bytes?: number | null; created_at?: string | null; branch_type?: string | null }>
+  photos?: Array<{ global_photo_id: string; original_file_id?: string | null; retouched_file_id?: string | null }>
 }) : Promise<OrphanScanResult> {
   const now = Date.now()
   const validR2 = new Set<string>()
   const validLocal = new Set<string>()
+  const filesByPhotoId = new Map<string, Array<{ branch_type?: string | null; object_key: string | null }>>()
 
   for (const file of params.photoFiles) {
     if (!file.object_key) continue
     if (file.storage_provider === 'r2') validR2.add(file.object_key)
     if (file.storage_provider === 'local') validLocal.add(file.object_key)
+    if (file.photo_id) {
+      const list = filesByPhotoId.get(file.photo_id) ?? []
+      list.push({ branch_type: file.branch_type, object_key: file.object_key })
+      filesByPhotoId.set(file.photo_id, list)
+    }
   }
 
   if (params.project.cover_url) {
@@ -49,11 +57,12 @@ export async function scanProjectStorageOrphans(params: {
   const r2Orphans: OrphanItem[] = []
   const localOrphans: OrphanItem[] = []
   const dbOrphans: OrphanItem[] = []
+  const zombiePhotos: OrphanItem[] = []
 
   const bucket = process.env.R2_BUCKET_NAME
   const publicBase = (process.env.R2_PUBLIC_BASE_URL || process.env.NEXT_PUBLIC_PHOTO_PUBLIC_BASE_URL || '').replace(/\/+$/, '')
   if (bucket) {
-    const prefixes = [`${params.projectId}/`]
+    const prefixes = [`${params.projectId}/`, `projects/${params.projectId}/`]
     for (const prefix of prefixes) {
       const listed = await r2.send(new ListObjectsV2Command({ Bucket: bucket, Prefix: prefix }))
       for (const item of listed.Contents ?? []) {
@@ -108,9 +117,26 @@ export async function scanProjectStorageOrphans(params: {
     }
   }
 
+  for (const photo of params.photos ?? []) {
+    const photoFiles = filesByPhotoId.get(photo.global_photo_id) ?? []
+    const hasAnyFile = photoFiles.length > 0
+    const hasRenderableFile = photoFiles.some((file) => file.branch_type === 'original' || file.branch_type === 'display' || file.branch_type === 'thumb')
+    const hasDirectRef = Boolean(photo.original_file_id || photo.retouched_file_id)
+
+    if (!hasDirectRef && (!hasAnyFile || !hasRenderableFile)) {
+      zombiePhotos.push({
+        path: photo.global_photo_id,
+        size: 0,
+        sourceType: 'zombie-photo',
+        reason: 'logical photo exists without original/retouched refs and without any valid renderable photo_files',
+      })
+    }
+  }
+
   return {
     r2_orphans: summarize(r2Orphans),
     local_orphans: summarize(localOrphans),
     db_orphans: summarize(dbOrphans),
+    zombie_photos: summarize(zombiePhotos),
   }
 }

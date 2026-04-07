@@ -146,7 +146,7 @@ export async function runProjectFtpIngest(params: {
     try {
       const existingImport = await params.supabaseAdmin
         .from('ftp_ingest_import_jobs')
-        .select('id, status')
+        .select('id, status, updated_at')
         .eq('project_id', params.projectId)
         .eq('buffer_job_id', jobId)
         .maybeSingle()
@@ -154,6 +154,14 @@ export async function runProjectFtpIngest(params: {
       if (existingImport.data?.id && existingImport.data?.status === 'imported') {
         summary.errors.push(`${jobId}: already imported`)
         continue
+      }
+
+      if (existingImport.data?.id && existingImport.data?.status === 'failed') {
+        const failedAt = existingImport.data.updated_at ? new Date(existingImport.data.updated_at).getTime() : 0
+        if (failedAt && Date.now() - failedAt < 60_000) {
+          summary.errors.push(`${jobId}: failed recently, waiting before retry`)
+          continue
+        }
       }
 
       if (existingImport.data?.id) {

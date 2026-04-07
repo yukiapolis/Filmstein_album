@@ -22,7 +22,7 @@ export async function POST(_req: Request, context: RouteContext) {
 
     const { data: photoRows, error: photoError } = await supabase
       .from('photos')
-      .select('global_photo_id')
+      .select('global_photo_id, original_file_id, retouched_file_id')
       .eq('project_id', id)
 
     if (photoError) {
@@ -32,7 +32,7 @@ export async function POST(_req: Request, context: RouteContext) {
     const photoIds = (photoRows ?? []).map((row) => row.global_photo_id)
     const { data: photoFiles, error: fileError } = await supabase
       .from('photo_files')
-      .select('photo_id, object_key, storage_provider, bucket_name, file_size_bytes, created_at')
+      .select('photo_id, object_key, storage_provider, bucket_name, file_size_bytes, created_at, branch_type')
       .in('photo_id', photoIds.length > 0 ? photoIds : ['__none__'])
 
     if (fileError) {
@@ -43,6 +43,7 @@ export async function POST(_req: Request, context: RouteContext) {
       projectId: id,
       project,
       photoFiles: photoFiles ?? [],
+      photos: photoRows ?? [],
     })
 
     return Response.json({ success: true, data: result })
