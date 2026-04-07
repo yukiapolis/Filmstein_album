@@ -1,11 +1,18 @@
 import { supabase } from '../../../src/lib/supabase/client'
 import { mapRowToProject } from '@/lib/mapProject'
 
+function sumProjectStorageUsedBytes(fileRows: Array<{ file_size_bytes?: unknown }>) {
+  return fileRows.reduce((total, row) => total + (typeof row.file_size_bytes === 'number' ? row.file_size_bytes : 0), 0)
+}
+
 const PROJECT_TYPES = new Set(['Wedding', 'Event', 'Campaign'])
 
 export async function GET() {
   try {
-    const { data, error } = await supabase.from('projects').select('*')
+    const { data, error } = await supabase
+      .from('projects')
+      .select('id, name, client_name, description, type, status, cover_url, ftp_ingest, project_assets, visual_settings, created_at')
+      .order('created_at', { ascending: false })
 
     if (error) {
       return Response.json(
@@ -14,16 +21,48 @@ export async function GET() {
       )
     }
 
-    const projects = (data ?? []).map((row) =>
-      mapRowToProject(row as Record<string, unknown>)
-    )
+    const projectsWithStats = await Promise.all((data ?? []).map(async (row) => {
+      const projectId = String(row.id ?? '')
+
+      const { data: photoRows, error: photoError } = await supabase
+        .from('photos')
+        .select('global_photo_id, project_id')
+        .eq('project_id', projectId)
+
+      if (photoError) throw new Error(photoError.message)
+
+      const photoIds = (photoRows ?? [])
+        .filter((photo) => String(photo.project_id ?? '') === projectId)
+        .map((photo) => String(photo.global_photo_id ?? ''))
+        .filter(Boolean)
+
+      let fileRows: Array<{ file_size_bytes?: unknown }> = []
+      if (photoIds.length > 0) {
+        const fileRes = await supabase
+          .from('photo_files')
+          .select('file_size_bytes')
+          .in('photo_id', photoIds)
+
+        if (fileRes.error) {
+          fileRows = []
+        } else {
+          fileRows = (fileRes.data ?? []) as Array<{ file_size_bytes?: unknown }>
+        }
+      }
+
+      return mapRowToProject({
+        ...(row as Record<string, unknown>),
+        photo_count: photoIds.length,
+        storage_used_bytes: sumProjectStorageUsedBytes(fileRows),
+      })
+    }))
 
     return Response.json({
       success: true,
-      data: projects,
+      data: projectsWithStats,
     })
-  } catch {
-    return Response.json({ success: false, error: 'Server error' }, { status: 500 })
+  } catch (error) {
+    return Response.json({ success: false, error: error instanceof Error ? error.message : 'Server error' }, { status: 500 })
   }
 }
 

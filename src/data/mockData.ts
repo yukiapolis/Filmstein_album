@@ -9,8 +9,10 @@ export interface Project {
   name: string;
   type: ProjectType;
   date: string;
+  created_at?: string;
   cover_url: string;
   photoCount: number;
+  storage_used_bytes?: number;
   status: ProjectStatus;
   clientName: string;
   description: string;
@@ -20,6 +22,23 @@ export interface Project {
     project_code?: string;
     auto_sync_interval_seconds?: number;
     last_sync_at?: string | null;
+  };
+  project_assets?: {
+    cover?: { url?: string; file_name?: string; mime_type?: string; file_size_bytes?: number };
+    banner?: { url?: string; file_name?: string; mime_type?: string; file_size_bytes?: number };
+    splash_poster?: { url?: string; file_name?: string; mime_type?: string; file_size_bytes?: number; duration_seconds?: number };
+    loading_gif?: { url?: string; file_name?: string; mime_type?: string; file_size_bytes?: number };
+    watermark_logo?: { url?: string; file_name?: string; mime_type?: string; file_size_bytes?: number };
+  };
+  visual_settings?: {
+    watermark?: {
+      enabled?: boolean;
+      position?: string;
+      offset_x?: number;
+      offset_y?: number;
+      scale?: number;
+      opacity?: number;
+    };
   };
 }
 

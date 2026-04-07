@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 interface PhotoCardProps {
   photo: Photo;
   onClick?: () => void;
+  onDoubleClick?: () => void;
   selected?: boolean;
   onSelect?: (selected: boolean) => void;
   selectionMode?: boolean;
@@ -17,6 +18,7 @@ interface PhotoCardProps {
   hideMetaOverlay?: boolean;
   hideDownloadButton?: boolean;
   clientDownloadMode?: boolean;
+  forceSquare?: boolean;
 }
 
 const PhotoCard = ({
@@ -30,9 +32,9 @@ const PhotoCard = ({
   hideMetaOverlay = false,
   hideDownloadButton = false,
   clientDownloadMode = false,
+  forceSquare = false,
 }: PhotoCardProps) => {
-  const colorInfo =
-    photo.colorLabel !== "none" ? colorLabelMap[photo.colorLabel] : null;
+  const colorInfo = photo.colorLabel !== "none" ? colorLabelMap[photo.colorLabel] : null;
   const isEdited = (photo.versionCount || 1) > 1;
   const [showDownloadMenu, setShowDownloadMenu] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -55,7 +57,7 @@ const PhotoCard = ({
 
   const openDownload = async (variant: "current" | "retouched-original" | "original" | "client-display" | "client-original") => {
     const url = clientDownloadMode
-      ? `/api/photos/${photo.id}/download?clientSafe=true&variant=${variant === 'client-original' ? 'client-original' : 'current'}`
+      ? `/api/photos/${photo.id}/client-render?mode=download`
       : `/api/photos/${photo.id}/download?variant=${variant}`;
     const check = await fetch(url, { method: "HEAD" });
     if (!check.ok) {
@@ -80,14 +82,20 @@ const PhotoCard = ({
   if (variant === "overlay") {
     return (
       <div
-        className="group relative cursor-pointer overflow-hidden rounded-2xl bg-muted/70 shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md"
+        className={cn(
+          "group relative cursor-pointer overflow-hidden bg-muted/70 shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md",
+          forceSquare ? "aspect-square rounded-none" : "rounded-none"
+        )}
         onClick={onClick}
       >
-        <div className="overflow-hidden">
+        <div className={cn("overflow-hidden", forceSquare ? "aspect-square" : "") }>
           <img
             src={imageSrc}
             alt={photo.fileName}
-            className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.03]"
+            className={cn(
+              "h-full w-full transition-transform duration-500 group-hover:scale-[1.03]",
+              forceSquare ? 'object-cover' : 'object-contain bg-muted'
+            )}
             loading="lazy"
           />
         </div>
@@ -95,17 +103,7 @@ const PhotoCard = ({
         {selected && <div className="absolute inset-0 z-10 bg-black/25" />}
 
         {colorInfo && (
-          <div
-            className={`absolute bottom-2 left-2 z-20 h-3.5 w-3.5 rounded-full ${colorInfo.bg} ring-2 ring-white/80`}
-          />
-        )}
-
-        {!hideStatusBadge && photo.photoStatus === "original" && (
-          <div className="absolute top-2 left-2 z-20">
-            <span className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
-              original
-            </span>
-          </div>
+          <div className={`absolute bottom-2 left-2 z-20 h-3.5 w-3.5 rounded-full ${colorInfo.bg} ring-2 ring-white/80`} />
         )}
 
         {onSelect !== undefined && (
@@ -124,17 +122,6 @@ const PhotoCard = ({
             {selected && <Check className="h-3.5 w-3.5 text-primary-foreground" />}
           </button>
         )}
-
-        {!hideMetaOverlay && (
-          <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/60 to-transparent p-3 pt-8 opacity-0 transition-opacity group-hover:opacity-100">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs font-medium text-white">{photo.fileName}</p>
-                <p className="text-xs text-white/70">{photo.tag}</p>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
     );
   }
@@ -142,52 +129,38 @@ const PhotoCard = ({
   return (
     <div
       className={cn(
-        "overflow-visible rounded-xl border border-border bg-card shadow-sm transition-all",
+        "overflow-visible border border-border bg-card shadow-sm transition-all",
+        forceSquare ? "rounded-none" : "rounded-xl",
         selected ? "ring-2 ring-sky-500/70 shadow-md" : "hover:shadow-md",
       )}
     >
-      <div className="group relative aspect-[4/3] cursor-pointer overflow-hidden rounded-t-xl bg-muted" onClick={onClick}>
+      <div
+        className={cn("group relative cursor-pointer overflow-hidden bg-muted", forceSquare ? "aspect-square rounded-none" : "aspect-[4/3] rounded-t-xl")}
+        onClick={onClick}
+      >
         <img
           src={imageSrc}
           alt={photo.fileName}
           className={cn(
             "h-full w-full object-cover transition-all duration-300",
-            selected ? "scale-[0.97] brightness-50" : "group-hover:scale-[1.02]",
+            photo.isPublished === false ? "brightness-50" : "",
+            selected ? "scale-[0.97]" : "group-hover:scale-[1.02]",
           )}
           loading="lazy"
         />
 
-        {photo.isPublished === false && (
-          <div className="absolute inset-0 z-10 bg-black/35 pointer-events-none" />
-        )}
-
         {selected && <div className="absolute inset-0 z-10 bg-black/20 pointer-events-none" />}
-
-        {!hideStatusBadge && <div className="absolute left-2 top-2 z-20 flex flex-col gap-1">
-          <span
-            className={cn(
-              "inline-flex items-center rounded-md px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
-              isEdited
-                ? "bg-sky-600 text-white shadow-sm"
-                : "border border-border/80 bg-white/95 text-muted-foreground shadow-sm",
-            )}
-          >
-            {isEdited ? "retouched" : "original"}
-          </span>
-        </div>}
 
         {photo.isPublished === false && (
           <div className="absolute inset-0 z-20 flex items-center justify-center pointer-events-none">
-            <span className="inline-flex items-center rounded-md bg-black/75 px-3 py-1 text-xs font-semibold text-white shadow-sm">
+            <span className="rounded-md bg-black/30 px-3 py-1 text-base font-semibold text-white/95 drop-shadow sm:text-lg">
               未发布
             </span>
           </div>
         )}
 
         {colorInfo && (
-          <div
-            className={`absolute bottom-2 left-2 z-20 h-3 w-3 rounded-full ${colorInfo.bg} ring-2 ring-white/90`}
-          />
+          <div className={`absolute bottom-2 left-2 z-20 h-3 w-3 rounded-full ${colorInfo.bg} ring-2 ring-white/90`} />
         )}
 
         {onSelect !== undefined && (
@@ -197,10 +170,8 @@ const PhotoCard = ({
             className={cn(
               "absolute bottom-2 right-2 z-20 flex h-8 w-8 items-center justify-center rounded-full border-2 transition-all",
               selected
-                ? "border-sky-600 bg-sky-600 text-white"
-                : selectionMode
-                  ? "border-white/80 bg-black/40 text-white opacity-100"
-                  : "border-white/80 bg-black/40 text-white opacity-0 group-hover:opacity-100",
+                ? "border-sky-600 bg-sky-600 text-white opacity-100"
+                : "border-white/80 bg-black/40 text-white opacity-0 group-hover:opacity-100",
             )}
             aria-label={selected ? "Deselect" : "Select"}
           >
@@ -209,95 +180,87 @@ const PhotoCard = ({
         )}
       </div>
 
-      <div className="flex items-start justify-between gap-2 border-t border-border/60 px-3 py-2.5">
+      <div className={cn("flex items-start justify-between gap-2 border-t border-border/60 px-3 py-2.5", forceSquare ? "rounded-none" : "") }>
         <div className="min-w-0 flex-1">
-          <p
-            className={cn(
-              "truncate text-sm font-medium transition-colors",
-              selected ? "text-muted-foreground" : "text-foreground",
-            )}
-          >
-            {photo.fileName}
-          </p>
+          <div className="flex items-center gap-2">
+            <p
+              className={cn(
+                "truncate text-sm font-medium transition-colors",
+                selected ? "text-muted-foreground" : "text-foreground",
+              )}
+            >
+              {photo.fileName}
+            </p>
+            <span
+              className={cn(
+                "inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
+                isEdited ? "bg-sky-50 text-sky-700" : "bg-muted text-muted-foreground"
+              )}
+            >
+              {isEdited ? "Retouched" : "Original"}
+            </span>
+          </div>
           <p className="text-xs text-muted-foreground">{uploadedAt}</p>
         </div>
-        {!hideDownloadButton && <div className="relative z-30 shrink-0" ref={menuRef}>
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              setShowDownloadMenu((v) => !v);
-            }}
-            className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-            title="Download"
-            aria-label="Download"
-          >
-            <Download className="h-4 w-4" />
-          </button>
-          {showDownloadMenu && (
-            <div className="absolute right-0 top-8 z-50 min-w-40 rounded-lg border border-border bg-card p-1 shadow-lg">
-              {clientDownloadMode ? (
-                <>
-                  <button
-                    type="button"
-                    className="block w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted"
-                    onClick={(e) => {
+        {!hideDownloadButton && (
+          <div className="relative z-30 shrink-0 opacity-0 transition-opacity group-hover:opacity-100" ref={menuRef}>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowDownloadMenu((v) => !v);
+              }}
+              className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              title="Download"
+              aria-label="Download"
+            >
+              <Download className="h-4 w-4" />
+            </button>
+            {showDownloadMenu && (
+              <div className="absolute right-0 top-8 z-50 min-w-40 rounded-lg border border-border bg-card p-1 shadow-lg">
+                {clientDownloadMode ? (
+                  <>
+                    <button type="button" className="block w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted" onClick={(e) => {
                       e.stopPropagation();
                       void openDownload("client-display");
-                    }}
-                  >
-                    下载图片
-                  </button>
-                  <button
-                    type="button"
-                    className="block w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted"
-                    onClick={(e) => {
+                    }}>
+                      下载带水印图片
+                    </button>
+                    <button type="button" className="block w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted" onClick={(e) => {
                       e.stopPropagation();
                       void openDownload("client-original");
-                    }}
-                  >
-                    下载大图
-                  </button>
-                </>
-              ) : (
-                <>
-                  <button
-                    type="button"
-                    className="block w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted"
-                    onClick={(e) => {
+                    }}>
+                      下载带水印大图
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button type="button" className="block w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted" onClick={(e) => {
                       e.stopPropagation();
                       void openDownload("current");
-                    }}
-                  >
-                    下载当前版本
-                  </button>
-                  {(photo.versionCount || 1) > 1 && (
-                    <button
-                      type="button"
-                      className="block w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted"
-                      onClick={(e) => {
+                    }}>
+                      下载当前版本
+                    </button>
+                    {(photo.versionCount || 1) > 1 && (
+                      <button type="button" className="block w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted" onClick={(e) => {
                         e.stopPropagation();
                         void openDownload("retouched-original");
-                      }}
-                    >
-                      下载修图原图
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    className="block w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted"
-                    onClick={(e) => {
+                      }}>
+                        下载修图原图
+                      </button>
+                    )}
+                    <button type="button" className="block w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted" onClick={(e) => {
                       e.stopPropagation();
                       void openDownload("original");
-                    }}
-                  >
-                    下载最初原图
-                  </button>
-                </>
-              )}
-            </div>
-          )}
-        </div>}
+                    }}>
+                      下载最初原图
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

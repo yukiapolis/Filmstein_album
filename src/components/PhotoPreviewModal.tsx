@@ -1,9 +1,11 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { X, ChevronLeft, ChevronRight, Download, Heart, Trash2 } from "lucide-react";
+import { X, ChevronLeft, ChevronRight, Download, Heart, Trash2, Info, Loader2 } from "lucide-react";
 import type { Photo } from "@/data/mockData";
 import { Button } from "@/components/ui/button";
+import type { Project } from "@/data/mockData";
+import { getClientWatermarkConfig } from "@/lib/clientWatermark";
 
 interface PhotoPreviewModalProps {
   photos: Photo[];
@@ -14,13 +16,19 @@ interface PhotoPreviewModalProps {
   onDeleteAllVersions?: (photo: Photo) => Promise<void> | void;
   onTogglePublish?: (photo: Photo, isPublished: boolean) => Promise<void> | void;
   clientDownloadMode?: boolean;
+  project?: Project | null;
 }
 
-const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurrent, onDeleteAllVersions, onTogglePublish, clientDownloadMode = false }: PhotoPreviewModalProps) => {
+const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurrent, onDeleteAllVersions, onTogglePublish, clientDownloadMode = false, project = null }: PhotoPreviewModalProps) => {
   const [index, setIndex] = useState(initialIndex);
   const [showDownloadMenu, setShowDownloadMenu] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showInfo, setShowInfo] = useState(false);
+  const [imageLoading, setImageLoading] = useState(true);
+  const [highResRequested, setHighResRequested] = useState(false);
+  const [highResLoaded, setHighResLoaded] = useState(false);
+  const [highResFailed, setHighResFailed] = useState(false);
 
   const prev = useCallback(() => setIndex((i) => (i > 0 ? i - 1 : photos.length - 1)), [photos.length]);
   const next = useCallback(() => setIndex((i) => (i < photos.length - 1 ? i + 1 : 0)), [photos.length]);
@@ -47,9 +55,18 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurren
     latestVersionNo?: number;
   };
 
+  const watermarkConfig = getClientWatermarkConfig(project)
+
+  useEffect(() => {
+    setImageLoading(true)
+    setHighResRequested(false)
+    setHighResLoaded(false)
+    setHighResFailed(false)
+  }, [index, open])
+
   const openDownload = async (variant: "current" | "retouched-original" | "original" | "client-display" | "client-original") => {
     const url = clientDownloadMode
-      ? `/api/photos/${photo.id}/download?clientSafe=true&variant=${variant === 'client-original' ? 'client-original' : 'current'}`
+      ? `/api/photos/${photo.id}/client-render?mode=${variant === 'client-original' ? 'download' : 'download'}`
       : `/api/photos/${photo.id}/download?variant=${variant}`;
     const check = await fetch(url, { method: "HEAD" });
     if (!check.ok) {
@@ -116,6 +133,9 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurren
             <Trash2 className="h-5 w-5" />
           </Button>
         )}
+        <Button size="icon" variant="ghost" className="text-white hover:bg-white/10" onClick={(e) => { e.stopPropagation(); setShowInfo((v) => !v); }}>
+          <Info className="h-5 w-5" />
+        </Button>
         <div className="relative">
           <Button size="icon" variant="ghost" className="text-white hover:bg-white/10" onClick={(e) => { e.stopPropagation(); setShowDownloadMenu((v) => !v); }}>
             <Download className="h-5 w-5" />
@@ -132,7 +152,7 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurren
                       void openDownload("client-display");
                     }}
                   >
-                    下载图片
+                    下载带水印图片
                   </button>
                   <button
                     type="button"
@@ -142,7 +162,7 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurren
                       void openDownload("client-original");
                     }}
                   >
-                    下载大图
+                    下载带水印大图
                   </button>
                 </>
               ) : (
@@ -197,13 +217,35 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurren
         <ChevronLeft className="h-6 w-6" />
       </button>
 
-      <div className="max-h-[85vh] max-w-[85vw]" onClick={(e) => e.stopPropagation()}>
-        <div className="relative">
+      <div className="max-h-[85vh] w-[min(92vw,1200px)]" onClick={(e) => e.stopPropagation()}>
+        <div className="relative flex max-h-[85vh] items-center justify-center overflow-hidden rounded-xl bg-black/40">
+          {imageLoading && (
+            <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/35 backdrop-blur-sm">
+              <div className="flex items-center gap-3 rounded-full bg-white/10 px-4 py-2 text-sm text-white">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                {highResRequested && !highResLoaded ? 'Loading high resolution…' : 'Loading image…'}
+              </div>
+            </div>
+          )}
           <img
-            src={photo.displayUrl || photo.file_url || photo.url}
+            src={clientDownloadMode
+              ? `/api/photos/${photo.id}/client-render?mode=${highResRequested ? 'download' : 'preview'}`
+              : (highResRequested ? (photo.originalUrl || photo.retouchedOriginalUrl || photo.displayUrl || photo.file_url || photo.url) : (photo.displayUrl || photo.file_url || photo.url))}
             alt={photo.fileName}
-            className="max-h-[85vh] max-w-[85vw] object-contain"
+            className="max-h-[85vh] max-w-full object-contain"
+            onLoad={() => {
+              setImageLoading(false)
+              if (highResRequested) setHighResLoaded(true)
+            }}
+            onError={() => {
+              setImageLoading(false)
+              if (highResRequested) {
+                setHighResFailed(true)
+                setHighResRequested(false)
+              }
+            }}
           />
+          {clientDownloadMode && watermarkConfig.enabled && watermarkConfig.logoUrl && false && null}
           {photo.isPublished === false && (
             <div className="absolute inset-0 bg-black/20 pointer-events-none" />
           )}
@@ -218,9 +260,36 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurren
         <ChevronRight className="h-6 w-6" />
       </button>
 
-      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 text-sm text-white/70">
-        {photo.fileName} · {index + 1} / {photos.length}
+      <div className="absolute bottom-4 left-1/2 flex -translate-x-1/2 items-center gap-3 text-sm text-white/70">
+        {!highResLoaded && (
+          <button
+            type="button"
+            className="rounded-full border border-white/15 bg-white/5 px-3 py-1 text-xs text-white/85 transition hover:bg-white/10"
+            onClick={(e) => {
+              e.stopPropagation()
+              setHighResRequested(true)
+              setImageLoading(true)
+              setHighResFailed(false)
+            }}
+          >
+            查看高清大图
+          </button>
+        )}
+        <span>{index + 1} / {photos.length}</span>
       </div>
+
+      {highResFailed && (
+        <div className="absolute bottom-14 left-1/2 z-20 -translate-x-1/2 rounded-full border border-white/10 bg-black/60 px-3 py-1 text-xs text-white/85 backdrop-blur">
+          高清图加载失败，已保留当前预览图
+        </div>
+      )}
+
+      {showInfo && (
+        <div className="absolute bottom-14 left-1/2 z-20 w-[min(92vw,520px)] -translate-x-1/2 rounded-xl border border-white/10 bg-black/65 px-4 py-3 text-white backdrop-blur">
+          <p className="text-sm font-medium">{photo.fileName}</p>
+          <p className="mt-1 text-xs text-white/75">{photo.uploadedAt || 'Unknown time'}</p>
+        </div>
+      )}
 
       {showDeleteConfirm && (
         <div className="absolute inset-0 z-[60] flex items-center justify-center bg-black/60" onClick={(e) => e.stopPropagation()}>

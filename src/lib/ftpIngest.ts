@@ -1,6 +1,7 @@
 import os from 'node:os'
 import path from 'node:path'
 import fs from 'node:fs/promises'
+import sharp from 'sharp'
 
 export type FtpIngestConfig = {
   enabled?: boolean
@@ -28,6 +29,71 @@ async function postJson(url: string, body: unknown) {
   let json: any = null
   try { json = text ? JSON.parse(text) : null } catch {}
   return { res, json, text }
+}
+
+async function validateDownloadedImage(params: { tempPath: string; fileName: string; buffer: Buffer }) {
+  const stat = await fs.stat(params.tempPath)
+  if (!stat.isFile() || stat.size <= 0) {
+    throw new Error('invalid image file: downloaded file missing or empty')
+  }
+
+  const ext = path.extname(params.fileName).toLowerCase()
+  const allowedExt = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif', '.tif', '.tiff'])
+  if (ext && !allowedExt.has(ext)) {
+    throw new Error(`invalid image file: unsupported extension ${ext}`)
+  }
+
+  let metadata: sharp.Metadata
+  try {
+    metadata = await sharp(params.buffer, { failOn: 'error' }).metadata()
+  } catch {
+    throw new Error('metadata read failed')
+  }
+
+  if (!metadata.format || !['jpeg', 'png', 'webp', 'gif', 'tiff'].includes(metadata.format)) {
+    throw new Error('invalid image file: unsupported or unreadable image format')
+  }
+
+  if (!metadata.width || !metadata.height || metadata.width <= 0 || metadata.height <= 0) {
+    throw new Error('invalid image file: missing image dimensions')
+  }
+
+  try {
+    await sharp(params.buffer, { failOn: 'error' }).resize({ width: 64 }).toBuffer()
+  } catch {
+    throw new Error('thumb generation failed')
+  }
+
+  try {
+    await sharp(params.buffer, { failOn: 'error' }).resize({ width: 1600, withoutEnlargement: true }).toBuffer()
+  } catch {
+    throw new Error('display generation failed')
+  }
+}
+
+async function cleanupPartialUpload(params: {
+  uploadBaseUrl: string
+  projectId: string
+  supabaseAdmin: { from: (table: string) => any }
+  recentBeforeIso: string
+  fileName: string
+}) {
+  const cleanupCandidates = await params.supabaseAdmin
+    .from('photo_files')
+    .select('id, photo_id, file_name, original_file_name, created_at')
+    .gte('created_at', params.recentBeforeIso)
+    .or(`file_name.eq.${params.fileName},original_file_name.eq.${params.fileName}`)
+
+  const rows = Array.isArray(cleanupCandidates.data) ? cleanupCandidates.data : []
+  const photoIds = Array.from(new Set(rows.map((row: any) => String(row.photo_id ?? '')).filter(Boolean)))
+
+  for (const photoId of photoIds) {
+    try {
+      await fetch(`${params.uploadBaseUrl}/api/photos/${photoId}?mode=all-versions`, { method: 'DELETE' })
+    } catch {
+      // best-effort cleanup only
+    }
+  }
 }
 
 export async function runProjectFtpIngest(params: {
@@ -80,7 +146,7 @@ export async function runProjectFtpIngest(params: {
     try {
       const existingImport = await params.supabaseAdmin
         .from('ftp_ingest_import_jobs')
-        .select('id, status')
+        .select('id, status, updated_at')
         .eq('project_id', params.projectId)
         .eq('buffer_job_id', jobId)
         .maybeSingle()
@@ -88,6 +154,14 @@ export async function runProjectFtpIngest(params: {
       if (existingImport.data?.id && existingImport.data?.status === 'imported') {
         summary.errors.push(`${jobId}: already imported`)
         continue
+      }
+
+      if (existingImport.data?.id && existingImport.data?.status === 'failed') {
+        const failedAt = existingImport.data.updated_at ? new Date(existingImport.data.updated_at).getTime() : 0
+        if (failedAt && Date.now() - failedAt < 60_000) {
+          summary.errors.push(`${jobId}: failed recently, waiting before retry`)
+          continue
+        }
       }
 
       if (existingImport.data?.id) {
@@ -114,14 +188,22 @@ export async function runProjectFtpIngest(params: {
       }
 
       const arrayBuffer = await fileRes.arrayBuffer()
-      const fileName = String(job.file_name ?? job.filename ?? `${jobId}.bin`)
+      const fileBuffer = Buffer.from(arrayBuffer)
+      const fileName = String(job.file_name ?? job.filename ?? '')
+      if (!fileName.trim()) {
+        throw new Error('invalid image file: missing file name')
+      }
+
       const tempPath = path.join(os.tmpdir(), `filmstein-ftp-${jobId}-${fileName.replace(/[^a-zA-Z0-9._-]+/g, '_')}`)
-      await fs.writeFile(tempPath, Buffer.from(arrayBuffer))
+      await fs.writeFile(tempPath, fileBuffer)
 
       try {
+        await validateDownloadedImage({ tempPath, fileName, buffer: fileBuffer })
+
+        const beforeUploadIso = new Date().toISOString()
         const form = new FormData()
         form.append('projectId', params.projectId)
-        form.append('file', new File([Buffer.from(arrayBuffer)], fileName, { type: String(job.content_type ?? 'application/octet-stream') }))
+        form.append('file', new File([fileBuffer], fileName, { type: String(job.content_type ?? 'application/octet-stream') }))
 
         const uploadRes = await fetch(`${params.uploadBaseUrl}/api/upload`, {
           method: 'POST',
@@ -130,10 +212,17 @@ export async function runProjectFtpIngest(params: {
         const uploadBody = await uploadRes.json().catch(() => null)
 
         if (!uploadRes.ok || uploadBody?.success !== true) {
+          await cleanupPartialUpload({
+            uploadBaseUrl: params.uploadBaseUrl,
+            projectId: params.projectId,
+            supabaseAdmin: params.supabaseAdmin,
+            recentBeforeIso: beforeUploadIso,
+            fileName,
+          })
           await postJson(`${baseUrl}/api/ingest/jobs/${encodeURIComponent(jobId)}/fail`, { error: uploadBody?.error || `upload failed (${uploadRes.status})` })
           await params.supabaseAdmin.from('ftp_ingest_import_jobs').update({ status: 'failed', updated_at: new Date().toISOString() }).eq('project_id', params.projectId).eq('buffer_job_id', jobId)
           summary.failedCount++
-          summary.errors.push(`${jobId}: upload failed`)
+          summary.errors.push(`${jobId}: ${uploadBody?.error || 'upload failed'}`)
           continue
         }
 
