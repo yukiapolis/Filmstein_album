@@ -3,6 +3,7 @@ import { promises as fs } from 'node:fs'
 import { supabase } from '@/lib/supabase/server'
 import { r2 } from '@/lib/r2/client'
 import { getLatestVersionNo, getVersionFiles, groupPhotoFilesByVersion, type PhotoFileRow } from '@/lib/photoVersions'
+import { buildLegacyCopyFromPhotoFile, isPhotoFileCopyRow } from '@/lib/photoFileCopies'
 
 type DeleteMode = 'current-version' | 'all-versions'
 
@@ -14,24 +15,46 @@ type FileRow = {
   bucket_name: string | null
   object_key: string | null
   created_at?: string | null
+  file_copies?: Array<{
+    id: string
+    photo_file_id: string
+    storage_provider: string
+    bucket_name?: string | null
+    storage_key: string
+    status: string
+    checksum_verified?: boolean | null
+    size_bytes?: number | null
+    size_verified?: boolean | null
+    is_primary_read_source?: boolean | null
+    last_verified_at?: string | null
+    last_error?: string | null
+    created_at?: string | null
+    updated_at?: string | null
+  }> | null
 }
 
 async function deleteStoredAsset(file: FileRow) {
-  if (file.storage_provider === 'r2' && file.bucket_name && file.object_key) {
-    const base = (process.env.R2_PUBLIC_BASE_URL || process.env.NEXT_PUBLIC_PHOTO_PUBLIC_BASE_URL || '').replace(/\/+$/, '')
-    const key = base && file.object_key.startsWith(base + '/')
-      ? file.object_key.slice(base.length + 1)
-      : file.object_key
+  const copies = Array.isArray(file.file_copies) && file.file_copies.length > 0
+    ? file.file_copies
+    : [buildLegacyCopyFromPhotoFile(file)].filter(isPhotoFileCopyRow)
 
-    await r2.send(new DeleteObjectCommand({
-      Bucket: file.bucket_name,
-      Key: key,
-    }))
-    return
-  }
+  for (const copy of copies) {
+    if (copy.storage_provider === 'r2' && copy.bucket_name && copy.storage_key) {
+      const base = (process.env.R2_PUBLIC_BASE_URL || process.env.NEXT_PUBLIC_PHOTO_PUBLIC_BASE_URL || '').replace(/\/+$/, '')
+      const key = base && copy.storage_key.startsWith(base + '/')
+        ? copy.storage_key.slice(base.length + 1)
+        : copy.storage_key
 
-  if (file.storage_provider === 'local' && file.object_key) {
-    await fs.rm(file.object_key, { force: true })
+      await r2.send(new DeleteObjectCommand({
+        Bucket: copy.bucket_name,
+        Key: key,
+      }))
+      continue
+    }
+
+    if (copy.storage_provider === 'local' && copy.storage_key) {
+      await fs.rm(copy.storage_key, { force: true })
+    }
   }
 }
 
@@ -88,7 +111,7 @@ export async function DELETE(req: Request) {
 
       const { data: filesToDelete, error: filesToDeleteError } = await supabase
         .from('photo_files')
-        .select('id, photo_id, branch_type, storage_provider, bucket_name, object_key')
+        .select('id, photo_id, branch_type, storage_provider, bucket_name, object_key, file_copies:photo_file_copies(id, photo_file_id, storage_provider, bucket_name, storage_key, status, checksum_verified, size_bytes, size_verified, is_primary_read_source, last_verified_at, last_error, created_at, updated_at)')
         .in('photo_id', photoIds)
 
       if (filesToDeleteError) {
@@ -131,7 +154,7 @@ export async function DELETE(req: Request) {
 
     const { data: files, error: filesError } = await supabase
       .from('photo_files')
-      .select('id, photo_id, branch_type, storage_provider, bucket_name, object_key, version_no, created_at')
+      .select('id, photo_id, branch_type, storage_provider, bucket_name, object_key, version_no, created_at, file_copies:photo_file_copies(id, photo_file_id, storage_provider, bucket_name, storage_key, status, checksum_verified, size_bytes, size_verified, is_primary_read_source, last_verified_at, last_error, created_at, updated_at)')
       .in('photo_id', photoIds)
       .order('version_no', { ascending: false })
       .order('created_at', { ascending: false })

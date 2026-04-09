@@ -5,6 +5,7 @@ import { getFirstVersionFiles, getFirstVersionNo, getLatestVersionFiles, getLate
 import { DeleteObjectCommand } from '@aws-sdk/client-s3'
 import { r2 } from '@/lib/r2/client'
 import fs from 'node:fs/promises'
+import { buildLegacyCopyFromPhotoFile } from '@/lib/photoFileCopies'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
@@ -57,7 +58,7 @@ export async function GET(req: Request, context: RouteContext) {
     if (photoIds.length > 0) {
       const { data: fileRows, error: filesError } = await supabase
         .from('photo_files')
-        .select('id, photo_id, file_name, original_file_name, object_key, storage_provider, bucket_name, created_at, branch_type, version_no')
+        .select('id, photo_id, file_name, original_file_name, object_key, storage_provider, bucket_name, created_at, branch_type, version_no, file_size_bytes, checksum_sha256, file_copies:photo_file_copies(id, photo_file_id, storage_provider, bucket_name, storage_key, status, checksum_verified, size_bytes, size_verified, is_primary_read_source, last_verified_at, last_error, created_at, updated_at)')
         .in('photo_id', photoIds)
 
       if (filesError) {
@@ -150,7 +151,7 @@ export async function DELETE(_req: Request, context: RouteContext) {
 
     const { data: fileRows, error: fileError } = await supabase
       .from('photo_files')
-      .select('id, object_key, storage_provider')
+      .select('id, object_key, storage_provider, bucket_name, file_copies:photo_file_copies(id, photo_file_id, storage_provider, bucket_name, storage_key, status, checksum_verified, size_bytes, size_verified, is_primary_read_source, last_verified_at, last_error, created_at, updated_at)')
       .in('photo_id', (
         await supabase.from('photos').select('global_photo_id').eq('project_id', id)
       ).data?.map((row) => row.global_photo_id) ?? [])
@@ -160,15 +161,22 @@ export async function DELETE(_req: Request, context: RouteContext) {
     }
 
     for (const file of fileRows ?? []) {
-      if (!file.object_key) continue
-      if (file.storage_provider === 'r2' && process.env.R2_BUCKET_NAME) {
-        try {
-          await r2.send(new DeleteObjectCommand({ Bucket: process.env.R2_BUCKET_NAME, Key: file.object_key }))
-        } catch {}
-      } else if (file.storage_provider === 'local') {
-        try {
-          await fs.rm(file.object_key, { force: true })
-        } catch {}
+      const copies = Array.isArray(file.file_copies) && file.file_copies.length > 0
+        ? file.file_copies
+        : [buildLegacyCopyFromPhotoFile(file)].filter(Boolean)
+      for (const copy of copies) {
+        if (!copy?.storage_key) continue
+        if (copy.storage_provider === 'r2' && copy.bucket_name) {
+          const base = (process.env.R2_PUBLIC_BASE_URL || process.env.NEXT_PUBLIC_PHOTO_PUBLIC_BASE_URL || '').replace(/\/+$/, '')
+          const key = base && copy.storage_key.startsWith(base + '/') ? copy.storage_key.slice(base.length + 1) : copy.storage_key
+          try {
+            await r2.send(new DeleteObjectCommand({ Bucket: copy.bucket_name, Key: key }))
+          } catch {}
+        } else if (copy.storage_provider === 'local') {
+          try {
+            await fs.rm(copy.storage_key, { force: true })
+          } catch {}
+        }
       }
     }
 
