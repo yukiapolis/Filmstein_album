@@ -1,5 +1,7 @@
 import { resolvePhotoPublicUrl } from '@/lib/resolvePhotoPublicUrl'
 
+import type { PhotoFileCopyRow } from '@/lib/photoFileCopies'
+
 export type PhotoFileRow = {
   id: string
   photo_id: string
@@ -11,6 +13,7 @@ export type PhotoFileRow = {
   storage_provider?: string | null
   bucket_name?: string | null
   created_at?: string | null
+  file_copies?: PhotoFileCopyRow[] | null
 }
 
 export type VersionBundle = {

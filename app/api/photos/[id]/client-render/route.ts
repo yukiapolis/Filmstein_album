@@ -4,8 +4,8 @@ import { NextRequest } from 'next/server'
 import sharp from 'sharp'
 import { createClient } from '@supabase/supabase-js'
 import { getLatestVersionFiles, type PhotoFileRow } from '@/lib/photoVersions'
-import { resolvePhotoPublicUrl } from '@/lib/resolvePhotoPublicUrl'
 import fs from 'node:fs/promises'
+import { buildLegacyCopyFromPhotoFile, isPhotoFileCopyRow, resolveCopyPublicUrl, selectReadableCopy } from '@/lib/photoFileCopies'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
@@ -56,7 +56,16 @@ async function loadPreferredImageSource(params: {
   if (params.mode === 'preview') {
     const displayFile = params.latestVersion.byBranch.display
     if (!displayFile) return { buffer: null, sourceKey: '', sourceType: 'none' as const, fallbackMessage: 'No display preview file found' }
-    const displayUrl = resolvePhotoPublicUrl(displayFile as unknown as Record<string, unknown>)
+    const selectedDisplayCopy = selectReadableCopy(displayFile.file_copies?.length ? displayFile.file_copies : [buildLegacyCopyFromPhotoFile(displayFile)].filter(isPhotoFileCopyRow)).copy
+    if (selectedDisplayCopy?.storage_provider === 'local' && selectedDisplayCopy.storage_key) {
+      try {
+        const buffer = await fs.readFile(selectedDisplayCopy.storage_key)
+        return { buffer, sourceKey: selectedDisplayCopy.storage_key, sourceType: 'display-local' as const, fallbackMessage: null }
+      } catch {
+        // continue to URL fallback
+      }
+    }
+    const displayUrl = resolveCopyPublicUrl(selectedDisplayCopy)
     if (!displayUrl) return { buffer: null, sourceKey: '', sourceType: 'none' as const, fallbackMessage: 'Display preview source unavailable' }
     const res = await fetch(displayUrl)
     if (!res.ok) return { buffer: null, sourceKey: displayUrl, sourceType: 'display' as const, fallbackMessage: 'Failed to fetch display preview' }
@@ -64,17 +73,20 @@ async function loadPreferredImageSource(params: {
   }
 
   const originalFile = params.latestVersion.byBranch.original
-  if (originalFile?.storage_provider === 'local' && originalFile.object_key) {
+  const selectedOriginalCopy = originalFile
+    ? selectReadableCopy(originalFile.file_copies?.length ? originalFile.file_copies : [buildLegacyCopyFromPhotoFile(originalFile)].filter(isPhotoFileCopyRow)).copy
+    : null
+  if (selectedOriginalCopy?.storage_provider === 'local' && selectedOriginalCopy.storage_key) {
     try {
-      const buffer = await fs.readFile(originalFile.object_key)
-      return { buffer, sourceKey: originalFile.object_key, sourceType: 'local-original' as const, fallbackMessage: null }
+      const buffer = await fs.readFile(selectedOriginalCopy.storage_key)
+      return { buffer, sourceKey: selectedOriginalCopy.storage_key, sourceType: 'local-original' as const, fallbackMessage: null }
     } catch {
       // continue to fallback chain
     }
   }
 
-  if (originalFile) {
-    const originalUrl = resolvePhotoPublicUrl(originalFile as unknown as Record<string, unknown>)
+  if (selectedOriginalCopy) {
+    const originalUrl = resolveCopyPublicUrl(selectedOriginalCopy)
     if (originalUrl) {
       const res = await fetch(originalUrl)
       if (res.ok) {
@@ -85,7 +97,21 @@ async function loadPreferredImageSource(params: {
 
   const displayFile = params.latestVersion.byBranch.display
   if (displayFile) {
-    const displayUrl = resolvePhotoPublicUrl(displayFile as unknown as Record<string, unknown>)
+    const selectedDisplayCopy = selectReadableCopy(displayFile.file_copies?.length ? displayFile.file_copies : [buildLegacyCopyFromPhotoFile(displayFile)].filter(isPhotoFileCopyRow)).copy
+    if (selectedDisplayCopy?.storage_provider === 'local' && selectedDisplayCopy.storage_key) {
+      try {
+        const buffer = await fs.readFile(selectedDisplayCopy.storage_key)
+        return {
+          buffer,
+          sourceKey: selectedDisplayCopy.storage_key,
+          sourceType: 'display-fallback' as const,
+          fallbackMessage: 'High-resolution original unavailable, using highest available display version',
+        }
+      } catch {
+        // continue to url fallback
+      }
+    }
+    const displayUrl = resolveCopyPublicUrl(selectedDisplayCopy)
     if (displayUrl) {
       const res = await fetch(displayUrl)
       if (res.ok) {
@@ -107,6 +133,7 @@ async function buildClientImage(request: NextRequest, context: RouteContext, hea
     const { id } = await context.params
     const supabase = getSupabaseAdmin()
     const mode = request.nextUrl.searchParams.get('mode') === 'download' ? 'download' : 'preview'
+    const disposition = request.nextUrl.searchParams.get('disposition') === 'attachment' ? 'attachment' : 'inline'
 
     const { data: photoRow, error: photoError } = await supabase
       .from('photos')
@@ -131,7 +158,7 @@ async function buildClientImage(request: NextRequest, context: RouteContext, hea
 
     const { data: fileRows, error: fileError } = await supabase
       .from('photo_files')
-      .select('id, photo_id, branch_type, file_name, original_file_name, object_key, storage_provider, bucket_name, version_no, created_at')
+      .select('id, photo_id, branch_type, file_name, original_file_name, object_key, storage_provider, bucket_name, version_no, created_at, file_size_bytes, checksum_sha256, file_copies:photo_file_copies(id, photo_file_id, storage_provider, bucket_name, storage_key, status, checksum_verified, size_bytes, size_verified, is_primary_read_source, last_verified_at, last_error, created_at, updated_at)')
       .eq('photo_id', id)
       .order('version_no', { ascending: false })
       .order('created_at', { ascending: false })
@@ -165,9 +192,7 @@ async function buildClientImage(request: NextRequest, context: RouteContext, hea
       return new Response(headOnly ? null : new Uint8Array(cached.buffer), {
         headers: {
           'Content-Type': cached.contentType,
-          'Content-Disposition': mode === 'download'
-            ? `attachment; filename*=UTF-8''${encodeURIComponent(cached.filename)}`
-            : `inline; filename*=UTF-8''${encodeURIComponent(cached.filename)}`,
+          'Content-Disposition': `${disposition}; filename*=UTF-8''${encodeURIComponent(cached.filename)}`,
           'Cache-Control': 'public, max-age=600',
           'X-Watermark-Cache': 'HIT',
           'X-Image-Source': source.sourceType,
@@ -180,9 +205,7 @@ async function buildClientImage(request: NextRequest, context: RouteContext, hea
       return new Response(headOnly ? null : new Uint8Array(source.buffer), {
         headers: {
           'Content-Type': 'image/jpeg',
-          'Content-Disposition': mode === 'download'
-            ? `attachment; filename*=UTF-8''${encodeURIComponent(`${id}-${mode}.jpg`)}`
-            : `inline; filename*=UTF-8''${encodeURIComponent(`${id}-${mode}.jpg`)}`,
+          'Content-Disposition': `${disposition}; filename*=UTF-8''${encodeURIComponent(`${id}-${mode}.jpg`)}`,
           'Cache-Control': 'public, max-age=300',
           'X-Watermark-Cache': 'BYPASS',
           'X-Image-Source': source.sourceType,
@@ -192,7 +215,19 @@ async function buildClientImage(request: NextRequest, context: RouteContext, hea
     }
 
     const logoRes = await fetch(logoUrl!)
-    if (!logoRes.ok) return Response.json({ error: 'Failed to fetch watermark logo' }, { status: 502 })
+    if (!logoRes.ok) {
+      return new Response(headOnly ? null : new Uint8Array(source.buffer), {
+        headers: {
+          'Content-Type': 'image/jpeg',
+          'Content-Disposition': `${disposition}; filename*=UTF-8''${encodeURIComponent(`${id}-${mode}.jpg`)}`,
+          'Cache-Control': 'public, max-age=300',
+          'X-Watermark-Cache': 'BYPASS',
+          'X-Image-Source': source.sourceType,
+          'X-Watermark-Fallback': 'logo-fetch-failed',
+          ...(source.fallbackMessage ? { 'X-Image-Fallback': source.fallbackMessage } : {}),
+        },
+      })
+    }
     const logoBuffer = Buffer.from(await logoRes.arrayBuffer())
 
     const baseMeta = await sharp(source.buffer).metadata()
@@ -249,9 +284,7 @@ async function buildClientImage(request: NextRequest, context: RouteContext, hea
     return new Response(headOnly ? null : new Uint8Array(outputBuffer), {
       headers: {
         'Content-Type': 'image/jpeg',
-        'Content-Disposition': mode === 'download'
-          ? `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`
-          : `inline; filename*=UTF-8''${encodeURIComponent(filename)}`,
+        'Content-Disposition': `${disposition}; filename*=UTF-8''${encodeURIComponent(filename)}`,
         'Cache-Control': 'public, max-age=600',
         'X-Watermark-Cache': 'MISS',
         'X-Image-Source': source.sourceType,

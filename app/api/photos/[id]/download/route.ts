@@ -2,9 +2,7 @@ export const runtime = 'nodejs';
 
 import { NextRequest } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { resolvePhotoPublicUrl } from "@/lib/resolvePhotoPublicUrl";
 import { getFirstVersionFiles, getLatestVersionFiles, type PhotoFileRow } from '@/lib/photoVersions'
 
 function getSupabaseAdmin() {
@@ -52,11 +50,11 @@ async function resolveDownload(
 ) {
   try {
     const { id } = await context.params;
-    const variantRaw = request.nextUrl.searchParams.get("variant") || 'current'
+    const variantRaw = request.nextUrl.searchParams.get("variant")
     const clientSafe = request.nextUrl.searchParams.get('clientSafe') === 'true'
     const variant = variantRaw === 'original' || variantRaw === 'retouched-original' || variantRaw === 'current' || variantRaw === 'client-original'
       ? variantRaw
-      : 'current'
+      : 'original'
     if (clientSafe && variant !== 'current' && variant !== 'client-original') {
       return Response.json({ error: 'Client-safe downloads only allow public variants' }, { status: 403 });
     }
@@ -84,7 +82,7 @@ async function resolveDownload(
 
     const { data: fileRows, error } = await supabase
       .from("photo_files")
-      .select("id, photo_id, branch_type, file_name, original_file_name, object_key, storage_provider, bucket_name, version_no, created_at")
+      .select("id, photo_id, branch_type, file_name, original_file_name, object_key, storage_provider, bucket_name, version_no, created_at, file_size_bytes, checksum_sha256, file_copies:photo_file_copies(id, photo_file_id, storage_provider, bucket_name, storage_key, status, checksum_verified, size_bytes, size_verified, is_primary_read_source, last_verified_at, last_error, created_at, updated_at)")
       .eq("photo_id", id)
       .order('version_no', { ascending: false })
       .order('created_at', { ascending: false })
@@ -119,46 +117,79 @@ async function resolveDownload(
     const safeVersionNo = versionNo ?? 1
     const filename = `${id}_v${safeVersionNo}_${readableBase}${ext}`;
 
-    if (file.storage_provider === "local" && typeof file.object_key === "string" && file.object_key.trim()) {
-      const localPath = path.isAbsolute(file.object_key)
-        ? file.object_key
-        : path.join(process.cwd(), file.object_key);
-      const buffer = await readFile(localPath);
-      const localExt = path.extname(filename).toLowerCase();
-      const contentType =
-        localExt === ".png" ? "image/png" :
-        localExt === ".webp" ? "image/webp" :
-        localExt === ".gif" ? "image/gif" :
-        localExt === ".tif" || localExt === ".tiff" ? "image/tiff" :
-        localExt === ".jpg" || localExt === ".jpeg" ? "image/jpeg" :
-        "application/octet-stream";
+    const shouldUseWatermarkedHighRes = variant === 'original' || variant === 'retouched-original' || variant === 'client-original'
 
-      return new Response(options?.headOnly ? null : buffer, {
+    if (shouldUseWatermarkedHighRes) {
+      const origin = request.nextUrl.origin
+      const renderUrl = `${origin}/api/photos/${id}/client-render?mode=download&disposition=attachment`
+      const upstream = await fetch(renderUrl, { method: options?.headOnly ? 'HEAD' : 'GET' })
+      if (!upstream.ok) {
+        const errorText = await upstream.text().catch(() => '')
+        return Response.json({ error: errorText || `Watermarked download failed: ${upstream.status}` }, { status: 502 })
+      }
+
+      const contentType = upstream.headers.get("content-type") || "image/jpeg"
+      return new Response(options?.headOnly ? null : upstream.body, {
         headers: {
           "Content-Type": contentType,
           "Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`,
+          "X-Download-Route-Version": "phase1-debug-v2",
+          "X-Download-Variant-Raw": variantRaw ?? '(default)',
+          "X-Download-Variant": variant,
+          "X-Download-Branch": "highres",
+          "X-Download-Target": "client-render-download",
+          "X-Download-Source": "client-render-download",
+          ...(upstream.headers.get('x-image-source') ? { "X-Image-Source": upstream.headers.get('x-image-source')! } : {}),
+          ...(upstream.headers.get('x-image-fallback') ? { "X-Image-Fallback": upstream.headers.get('x-image-fallback')! } : {}),
+          ...(upstream.headers.get('x-watermark-fallback') ? { "X-Watermark-Fallback": upstream.headers.get('x-watermark-fallback')! } : {}),
         },
-      });
+      })
     }
 
-    const src = resolvePhotoPublicUrl(file as unknown as Record<string, unknown>);
-    if (!src) {
+    const displayFile = latestVersion?.byBranch.display ?? null
+    if (!displayFile) {
       return Response.json({ error: "Download source unavailable" }, { status: 404 });
     }
 
-    const upstream = await fetch(src);
-    if (!upstream.ok) {
-      return Response.json({ error: `Upstream download failed: ${upstream.status}` }, { status: 502 });
+    const fallbackSupabase = createClient(process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!)
+    const { data: renderablePhoto, error: renderablePhotoError } = await fallbackSupabase
+      .from('photos')
+      .select('global_photo_id, is_published')
+      .eq('global_photo_id', id)
+      .maybeSingle()
+
+    if (renderablePhotoError) {
+      return Response.json({ error: renderablePhotoError.message }, { status: 500 })
     }
 
-    const contentType = upstream.headers.get("content-type") || "application/octet-stream";
+    if (!renderablePhoto || renderablePhoto.is_published !== true) {
+      return Response.json({ error: 'Photo is not available for watermarked download' }, { status: 403 })
+    }
 
+    const origin = request.nextUrl.origin
+    const renderUrl = `${origin}/api/photos/${id}/client-render?mode=preview&disposition=attachment`
+    const upstream = await fetch(renderUrl, { method: options?.headOnly ? 'HEAD' : 'GET' })
+    if (!upstream.ok) {
+      const errorText = await upstream.text().catch(() => '')
+      return Response.json({ error: errorText || `Preview download failed: ${upstream.status}` }, { status: 502 })
+    }
+
+    const contentType = upstream.headers.get("content-type") || "image/jpeg"
     return new Response(options?.headOnly ? null : upstream.body, {
       headers: {
         "Content-Type": contentType,
         "Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`,
+        "X-Download-Route-Version": "phase1-debug-v2",
+        "X-Download-Variant-Raw": variantRaw ?? '(default)',
+        "X-Download-Variant": variant,
+        "X-Download-Branch": "preview",
+        "X-Download-Target": "client-render-preview",
+        "X-Download-Source": "client-render-preview",
+        ...(upstream.headers.get('x-image-source') ? { "X-Image-Source": upstream.headers.get('x-image-source')! } : {}),
+        ...(upstream.headers.get('x-image-fallback') ? { "X-Image-Fallback": upstream.headers.get('x-image-fallback')! } : {}),
+        ...(upstream.headers.get('x-watermark-fallback') ? { "X-Watermark-Fallback": upstream.headers.get('x-watermark-fallback')! } : {}),
       },
-    });
+    })
   } catch (err) {
     return Response.json(
       { error: err instanceof Error ? err.message : "Internal server error" },
