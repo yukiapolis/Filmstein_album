@@ -42,3 +42,8 @@ next-env.d.ts
 
 # local storage artifacts
 /storage/
+
+# local validation / generated artifacts
+/validation-artifacts/
+/highres_*.jpg
+/preview_fallback_*.jpg

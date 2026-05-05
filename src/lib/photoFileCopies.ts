@@ -27,17 +27,33 @@ function byFreshness(a?: string | null, b?: string | null) {
 }
 
 function fallbackPriority(copy: PhotoFileCopyRow): number {
-  switch (copy.storage_provider) {
-    case 'local': return 2
-    case 'r2': return 1
-    default: return 0
-  }
+  const providerPriority = (() => {
+    switch (copy.storage_provider) {
+      case 'local': return 2
+      case 'r2': return 1
+      default: return 0
+    }
+  })()
+
+  const healthPenalty = [
+    copy.last_error ? -4 : 0,
+    copy.checksum_verified === false ? -2 : 0,
+    copy.size_verified === false ? -2 : 0,
+  ].reduce((sum, value) => sum + value, 0)
+
+  return providerPriority + healthPenalty
 }
 
 export function selectReadableCopy(copies: PhotoFileCopyRow[] | null | undefined): ReadableCopyResolution {
   const available = (copies ?? []).filter((copy) => copy.status === 'available' && typeof copy.storage_key === 'string' && copy.storage_key.trim())
 
-  const primary = available.find((copy) => copy.is_primary_read_source === true) ?? null
+  const primary = [...available]
+    .filter((copy) => copy.is_primary_read_source === true)
+    .sort((a, b) => {
+      const providerDiff = fallbackPriority(b) - fallbackPriority(a)
+      if (providerDiff !== 0) return providerDiff
+      return byFreshness(a.updated_at ?? a.created_at, b.updated_at ?? b.created_at)
+    })[0] ?? null
   if (primary) {
     return { copy: primary, source: 'primary' }
   }

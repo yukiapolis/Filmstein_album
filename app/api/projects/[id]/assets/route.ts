@@ -62,6 +62,8 @@ export async function POST(req: Request, context: RouteContext) {
       ? projectAssets[assetType] as Record<string, unknown>
       : {}
 
+    const versionToken = new Date().toISOString()
+
     const nextProjectAssets = {
       ...projectAssets,
       [assetType]: {
@@ -70,6 +72,7 @@ export async function POST(req: Request, context: RouteContext) {
         file_name: file.name,
         mime_type: file.type || null,
         file_size_bytes: file.size,
+        version_token: versionToken,
       },
     }
 
@@ -87,7 +90,7 @@ export async function POST(req: Request, context: RouteContext) {
       return Response.json({ success: false, error: updateError.message }, { status: 500 })
     }
 
-    return Response.json({ success: true, data: { assetType, url, fileName: file.name, size: file.size } })
+    return Response.json({ success: true, data: { assetType, url, fileName: file.name, size: file.size, versionToken } })
   } catch (error) {
     return Response.json({ success: false, error: error instanceof Error ? error.message : 'Server error' }, { status: 500 })
   }

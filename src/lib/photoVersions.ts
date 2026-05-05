@@ -19,11 +19,12 @@ export type PhotoFileRow = {
 export type VersionBundle = {
   versionNo: number
   files: PhotoFileRow[]
-  byBranch: Partial<Record<'original' | 'raw' | 'thumb' | 'display', PhotoFileRow>>
+  byBranch: Partial<Record<'original' | 'raw' | 'thumb' | 'display' | 'client_preview', PhotoFileRow>>
 }
 
 function branchRank(branchType: string | null | undefined): number {
   switch (branchType) {
+    case 'client_preview': return 5
     case 'display': return 4
     case 'thumb': return 3
     case 'original': return 2
@@ -54,7 +55,7 @@ export function groupPhotoFilesByVersion(fileRows: PhotoFileRow[]): VersionBundl
       const byBranch: VersionBundle['byBranch'] = {}
       for (const file of sortedFiles) {
         const branch = file.branch_type
-        if (branch === 'original' || branch === 'raw' || branch === 'thumb' || branch === 'display') {
+        if (branch === 'original' || branch === 'raw' || branch === 'thumb' || branch === 'display' || branch === 'client_preview') {
           byBranch[branch] ??= file
         }
       }

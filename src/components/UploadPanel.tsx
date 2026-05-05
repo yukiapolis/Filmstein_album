@@ -4,6 +4,8 @@ import { useRef, useState, useCallback, useEffect } from "react";
 import { Upload, X, CheckCircle2, AlertCircle, Loader2, Clock, Folder, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
+const ANALYZE_CONCURRENCY = 3;
+
 const formatFileSize = (bytes: number): string => {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -17,8 +19,10 @@ const statusIcon = (status: UploadFile["status"]) => {
     case "Failed":
       return <AlertCircle className="h-4 w-4 text-destructive" />;
     case "Uploading":
+    case "Analyzing":
       return <Loader2 className="h-4 w-4 text-primary animate-spin" />;
     case "Pending":
+    case "Skipped":
       return <Clock className="h-4 w-4 text-muted-foreground" />;
   }
 };
@@ -27,7 +31,7 @@ interface UploadFile {
   id: string;
   fileName: string;
   size: string;
-  status: "Pending" | "Uploading" | "Completed" | "Failed" | "Skipped";
+  status: "Pending" | "Analyzing" | "Uploading" | "Completed" | "Failed" | "Skipped";
   progress: number;
   analysisType?: "new" | "retouch" | "duplicate" | "unknown";
   classification?: "duplicate_original" | "retouch_upload" | "new_original" | "unknown" | "invalid_retouch_reference";
@@ -47,6 +51,16 @@ interface FolderItem {
   name: string;
 }
 
+interface UploadAnalysisData {
+  classification?: UploadFile["classification"];
+  matchedPhotoId?: string | null;
+  matchedVersionNo?: number | null;
+  nextVersionNo?: number | null;
+  checksumSha256?: string;
+  normalizedBaseName?: string;
+  reason?: string;
+}
+
 interface UploadPanelProps {
   open: boolean;
   onClose: () => void;
@@ -61,86 +75,130 @@ interface UploadPanelProps {
   onFolderCreated?: () => void;
 }
 
-const UploadPanel = ({
-  open,
+const UploadPanelContent = ({
   onClose,
   projectId,
   initialFolderId,
   folders = [],
   onUploadDone,
   onFolderCreated,
-}: UploadPanelProps) => {
+}: Omit<UploadPanelProps, "open">) => {
   const [files, setFiles] = useState<UploadFile[]>([]);
   const [displayPreset, setDisplayPreset] = useState<"original" | "6000" | "4000">("4000");
   const [isDragging, setIsDragging] = useState(false);
-  const [selectedFolderId, setSelectedFolderId] = useState<string>("");
+  const [selectedFolderId, setSelectedFolderId] = useState<string>(initialFolderId ?? "");
   const [showNewFolder, setShowNewFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
   const [mixedBatchActionOpen, setMixedBatchActionOpen] = useState(false);
+  const analyzeQueueRef = useRef<UploadFile[]>([]);
+  const activeAnalyzeCountRef = useRef(0);
+  const runAnalyzeQueueRef = useRef<() => void>(() => undefined);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Sync when panel opens
-  useEffect(() => {
-    if (open) {
-      setSelectedFolderId(initialFolderId ?? "");
-      setShowNewFolder(false);
-      setNewFolderName("");
-      setDisplayPreset("4000");
-    }
-  }, [open, initialFolderId]);
-
-  const addFiles = useCallback(async (rawFiles: FileList | File[]) => {
-    const pendingFiles: UploadFile[] = [];
-
-    for (const f of Array.from(rawFiles)) {
-      const item: UploadFile = {
-        id: crypto.randomUUID(),
-        fileName: f.name,
-        size: formatFileSize(f.size),
-        status: "Pending",
-        progress: 0,
-        _raw: f,
-      };
-
-      if (projectId) {
-        const formData = new FormData();
-        formData.append('file', f);
-        formData.append('projectId', projectId);
-        const res = await fetch('/api/upload?analyze=true', { method: 'POST', body: formData });
-        const body = await res.json().catch(() => null);
-        if (res.ok && body?.success && body?.data) {
-          item.classification = body.data.classification;
-          item.analysisType = body.data.classification === 'duplicate_original'
-            ? 'duplicate'
-            : body.data.classification === 'retouch_upload'
-              ? 'retouch'
-              : body.data.classification === 'new_original'
-                ? 'new'
-                : 'unknown';
-          item.matchedPhotoId = body.data.matchedPhotoId ?? null;
-          item.matchedVersionNo = body.data.matchedVersionNo ?? null;
-          item.nextVersionNo = body.data.nextVersionNo ?? null;
-          item.checksumSha256 = body.data.checksumSha256;
-          item.normalizedBaseName = body.data.normalizedBaseName;
-          item.reason = body.data.reason;
-        }
+  const applyAnalysisResult = useCallback((id: string, data?: UploadAnalysisData) => {
+    setFiles((prev) => prev.map((file) => {
+      if (file.id !== id) return file;
+      if (!data) {
+        return {
+          ...file,
+          status: 'Pending',
+          classification: 'unknown',
+          analysisType: 'unknown',
+          reason: file.reason || 'Analyze failed',
+        };
       }
 
-      pendingFiles.push(item);
+      return {
+        ...file,
+        status: 'Pending',
+        classification: data.classification,
+        analysisType: data.classification === 'duplicate_original'
+          ? 'duplicate'
+          : data.classification === 'retouch_upload'
+            ? 'retouch'
+            : data.classification === 'new_original'
+              ? 'new'
+              : 'unknown',
+        matchedPhotoId: data.matchedPhotoId ?? null,
+        matchedVersionNo: data.matchedVersionNo ?? null,
+        nextVersionNo: data.nextVersionNo ?? null,
+        checksumSha256: data.checksumSha256,
+        normalizedBaseName: data.normalizedBaseName,
+        reason: data.reason,
+      };
+    }));
+  }, []);
+
+  const runAnalyzeQueue = useCallback(() => {
+    if (!projectId) return;
+
+    while (activeAnalyzeCountRef.current < ANALYZE_CONCURRENCY && analyzeQueueRef.current.length > 0) {
+      const nextFile = analyzeQueueRef.current.shift();
+      if (!nextFile?._raw) continue;
+
+      activeAnalyzeCountRef.current += 1;
+      setFiles((prev) => prev.map((file) => file.id === nextFile.id ? { ...file, status: 'Analyzing' } : file));
+
+      const formData = new FormData();
+      formData.append('file', nextFile._raw);
+      formData.append('projectId', projectId);
+
+      fetch('/api/upload?analyze=true', { method: 'POST', body: formData })
+        .then(async (res) => {
+          const body = await res.json().catch(() => null);
+          if (res.ok && body?.success && body?.data) {
+            applyAnalysisResult(nextFile.id, body.data);
+            return;
+          }
+          applyAnalysisResult(nextFile.id, {
+            classification: 'unknown',
+            reason: body?.error || body?.message || 'Analyze failed',
+          });
+        })
+        .catch(() => {
+          applyAnalysisResult(nextFile.id, {
+            classification: 'unknown',
+            reason: 'Analyze failed',
+          });
+        })
+        .finally(() => {
+          activeAnalyzeCountRef.current = Math.max(0, activeAnalyzeCountRef.current - 1);
+          runAnalyzeQueueRef.current();
+        });
     }
+  }, [applyAnalysisResult, projectId]);
+
+  useEffect(() => {
+    runAnalyzeQueueRef.current = runAnalyzeQueue;
+  }, [runAnalyzeQueue]);
+
+  const addFiles = useCallback((rawFiles: FileList | File[]) => {
+    const pendingFiles: UploadFile[] = Array.from(rawFiles).map((f) => ({
+      id: crypto.randomUUID(),
+      fileName: f.name,
+      size: formatFileSize(f.size),
+      status: projectId ? 'Analyzing' : 'Pending',
+      progress: 0,
+      _raw: f,
+    }));
 
     setFiles((prev) => [...prev, ...pendingFiles]);
-  }, [projectId]);
+
+    if (projectId) {
+      analyzeQueueRef.current.push(...pendingFiles);
+      runAnalyzeQueue();
+    }
+  }, [projectId, runAnalyzeQueue]);
 
   const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files) void addFiles(e.target.files);
+    if (e.target.files) addFiles(e.target.files);
     e.target.value = "";
   };
 
   const handleDrop = (e: React.DragEvent<HTMLElement>) => {
     e.preventDefault();
     setIsDragging(false);
-    if (e.dataTransfer.files.length > 0) void addFiles(e.dataTransfer.files);
+    if (e.dataTransfer.files.length > 0) addFiles(e.dataTransfer.files);
   };
 
   const handleRemove = (id: string) => {
@@ -277,12 +335,11 @@ const UploadPanel = ({
     await handleUploadSubset(actionable);
   };
 
-  if (!open) return null;
-
   const fileNeedsDecision = (file: UploadFile) => file.classification === 'duplicate_original' && !file.uploadDecision;
 
   const pendingCount = files.filter((f) => f.status === "Pending").length;
-  const allDone = pendingCount === 0 && files.length > 0;
+  const analyzingCount = files.filter((f) => f.status === 'Analyzing').length;
+  const allDone = pendingCount === 0 && analyzingCount === 0 && files.length > 0;
   const pendingFiles = files.filter((f) => f.status === 'Pending');
   const actionablePendingFiles = pendingFiles.filter((f) => f.classification !== 'duplicate_original');
   const pendingRetouchCount = actionablePendingFiles.filter((f) => f.classification === 'retouch_upload').length;
@@ -398,6 +455,9 @@ const UploadPanel = ({
                     Upload All ({pendingCount})
                   </Button>
                 )}
+                {analyzingCount > 0 && (
+                  <span className="text-xs text-muted-foreground">Analyzing {analyzingCount}…</span>
+                )}
                 {pendingDuplicateCount > 0 && (
                   <span className="text-xs text-amber-700">{pendingDuplicateCount} duplicate file(s) need decision</span>
                 )}
@@ -415,7 +475,7 @@ const UploadPanel = ({
                         {file.classification === 'duplicate_original' && `Duplicate original${file.matchedPhotoId ? ` · ${file.matchedPhotoId}` : ''}`}
                         {file.classification === 'invalid_retouch_reference' && `Invalid retouch reference${file.reason ? ` · ${file.reason}` : ''}`}
                         {file.classification === 'unknown' && `Unknown${file.reason ? ` · ${file.reason}` : ''}`}
-                        {!file.classification && 'Analyzing…'}
+                        {!file.classification && (file.status === 'Analyzing' ? 'Analyzing…' : 'Waiting for analyze…')}
                       </p>
                     </div>
                     {file.status === "Uploading" && (
@@ -439,7 +499,7 @@ const UploadPanel = ({
                         </Button>
                       </div>
                     )}
-                    {file.status === "Pending" && (
+                    {(file.status === "Pending" || file.status === "Analyzing") && (
                       <button
                         type="button"
                         onClick={() => handleRemove(file.id)}
@@ -502,6 +562,11 @@ const UploadPanel = ({
       </div>
     </div>
   );
+};
+
+const UploadPanel = ({ open, ...props }: UploadPanelProps) => {
+  if (!open) return null;
+  return <UploadPanelContent {...props} />;
 };
 
 export default UploadPanel;

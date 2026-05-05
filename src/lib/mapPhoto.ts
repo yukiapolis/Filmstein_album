@@ -4,10 +4,6 @@ function toStringValue(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
 
-function toStringOrEmpty(value: unknown): string {
-  return typeof value === "string" ? value : "";
-}
-
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -18,6 +14,7 @@ export function mapRowToPhoto(row: Record<string, unknown>) {
   const latestOriginalFile = asRecord(row.latest_original_file);
   const latestThumbFile = asRecord(row.latest_thumb_file);
   const latestDisplayFile = asRecord(row.latest_display_file);
+  const latestClientPreviewFile = asRecord(row.latest_client_preview_file);
   const firstOriginalFile = asRecord(row.first_original_file);
 
   const cardFile = latestThumbFile ?? latestDisplayFile ?? latestOriginalFile ?? firstOriginalFile ?? row;
@@ -27,6 +24,15 @@ export function mapRowToPhoto(row: Record<string, unknown>) {
   const thumbUrl = resolvePhotoPublicUrl(cardFile as Record<string, unknown>);
   const displayUrl = resolvePhotoPublicUrl(displayActiveFile as Record<string, unknown>);
   const downloadUrl = resolvePhotoPublicUrl(downloadFile as Record<string, unknown>);
+  const versionCount = Number(row.version_count) || 1;
+  const latestVersionNo = Number(row.latest_version_no) || 1;
+  const firstVersionNo = Number(row.first_version_no) || latestVersionNo;
+  const projectWatermarkSignature = toStringValue(row.project_watermark_signature)
+  const clientPreviewWatermarkSignature = asRecord(latestClientPreviewFile?.processing_meta)?.watermark_signature
+  const resolvedClientPreviewUrl = latestClientPreviewFile ? resolvePhotoPublicUrl(latestClientPreviewFile) : ""
+  const clientPreviewUrl = resolvedClientPreviewUrl && (!projectWatermarkSignature || projectWatermarkSignature === clientPreviewWatermarkSignature)
+    ? `${resolvedClientPreviewUrl}${resolvedClientPreviewUrl.includes('?') ? '&' : '?'}wv=${encodeURIComponent(projectWatermarkSignature || String(latestVersionNo))}`
+    : "";
   const retouchedOriginalUrl = latestOriginalFile ? resolvePhotoPublicUrl(latestOriginalFile) : "";
   const originalUrl = firstOriginalFile ? resolvePhotoPublicUrl(firstOriginalFile) : retouchedOriginalUrl;
 
@@ -39,10 +45,27 @@ export function mapRowToPhoto(row: Record<string, unknown>) {
     toStringValue(firstOriginalFile?.original_file_name) ||
     "untitled";
 
-  const versionCount = Number(row.version_count) || 1;
-  const latestVersionNo = Number(row.latest_version_no) || 1;
-  const firstVersionNo = Number(row.first_version_no) || latestVersionNo;
   const photoStatus = versionCount > 1 ? "edited" : "original";
+  const adminColorTags = Array.isArray(row.admin_color_tags)
+    ? row.admin_color_tags.filter((value): value is string => typeof value === 'string')
+    : []
+  const clientMarkDetails = Array.isArray(row.client_mark_details)
+    ? row.client_mark_details
+        .map((value) => asRecord(value))
+        .filter((value): value is Record<string, unknown> => Boolean(value))
+        .map((value) => {
+          const viewerSessionId = toStringValue(value.viewer_session_id)
+          const createdAt = toStringValue(value.created_at)
+          const shortId = viewerSessionId ? viewerSessionId.slice(0, 8) : 'unknown'
+          return {
+            viewerSessionId,
+            createdAt: createdAt || undefined,
+            label: toStringValue(value.label) || `viewer:${shortId}`,
+          }
+        })
+        .filter((value) => value.viewerSessionId)
+    : []
+  const clientMarkCount = Number(row.client_mark_count) || clientMarkDetails.length || 0
 
   return {
     id: toStringValue(row.global_photo_id) || toStringValue(row.id),
@@ -51,6 +74,7 @@ export function mapRowToPhoto(row: Record<string, unknown>) {
     file_url: downloadUrl || displayUrl || thumbUrl,
     thumbUrl,
     displayUrl,
+    clientPreviewUrl,
     downloadUrl,
     retouchedOriginalUrl,
     originalUrl,
@@ -68,9 +92,17 @@ export function mapRowToPhoto(row: Record<string, unknown>) {
     retouchedFileId: toStringValue(latestDisplayFile?.id) || toStringValue(row.retouched_file_id),
     thumbFileId: toStringValue(latestThumbFile?.id),
     displayFileId: toStringValue(latestDisplayFile?.id),
+    clientPreviewFileId: toStringValue(latestClientPreviewFile?.id),
+    clientPreviewWatermarkSignature: typeof clientPreviewWatermarkSignature === 'string' ? clientPreviewWatermarkSignature : undefined,
+    projectWatermarkSignature,
     versionCount,
     latestVersionNo,
     firstVersionNo,
     isPublished: row.is_published === true,
+    clientMarked: row.client_marked === true,
+    clientMarkCount,
+    hasClientMarks: clientMarkCount > 0,
+    clientMarkDetails,
+    adminColorTags,
   };
 }

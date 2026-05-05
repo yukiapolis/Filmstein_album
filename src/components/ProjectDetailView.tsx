@@ -83,7 +83,8 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
   const [editOpen, setEditOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [activeAlbum, setActiveAlbum] = useState("all");
-  const [colorFilter, setColorFilter] = useState<ColorLabel | "all">("all");
+  const [colorFilter, setColorFilter] = useState<ColorLabel[]>([]);
+  const [clientMarkedFilter, setClientMarkedFilter] = useState(false);
   const [publishFilter, setPublishFilter] = useState<"all" | "published" | "unpublished">("all");
   const [expandedAlbums, setExpandedAlbums] = useState<Set<string>>(new Set());
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
@@ -218,8 +219,12 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
       list = list.filter((p) => p.selected);
     }
 
-    if (colorFilter !== "all") {
-      list = list.filter((p) => p.colorLabel === colorFilter);
+    if (colorFilter.length > 0) {
+      list = list.filter((p) => (p.adminColorTags ?? []).some((tag) => colorFilter.includes(tag)));
+    }
+
+    if (clientMarkedFilter) {
+      list = list.filter((p) => p.hasClientMarks === true);
     }
 
     if (publishFilter === "published") {
@@ -229,7 +234,7 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
     }
 
     return list;
-  }, [activeAlbum, activeTab, colorFilter, publishFilter, photos, albumsForUi]);
+  }, [activeAlbum, activeTab, clientMarkedFilter, colorFilter, publishFilter, photos, albumsForUi]);
 
   const displayPhotos = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -288,6 +293,51 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
       // ignore
     }
   }, [projectId]);
+
+  const toggleColorFilter = useCallback((color: ColorLabel) => {
+    setColorFilter((prev) => prev.includes(color) ? prev.filter((value) => value !== color) : [...prev, color]);
+  }, []);
+
+  const handleToggleAdminColorTag = useCallback(async (photoId: string, color: Exclude<ColorLabel, 'none'>) => {
+    const res = await fetch(`/api/photos/${photoId}/admin-color-tags`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ projectId, color }),
+    })
+    const body = await res.json().catch(() => ({}))
+    if (!res.ok || body.success !== true) {
+      console.error('Color tag toggle failed:', body.error)
+      return
+    }
+
+    const nextTags = Array.isArray(body.data?.adminColorTags) ? body.data.adminColorTags as ColorLabel[] : []
+    setPhotos((prev) => prev.map((photo) => photo.id === photoId ? { ...photo, adminColorTags: nextTags } : photo))
+  }, [projectId])
+
+  const handleRemoveClientMark = useCallback(async (photo: Photo, viewerSessionId: string) => {
+    const res = await fetch(`/api/photos/${photo.id}/client-mark`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ projectId, viewerSessionId }),
+    })
+    const body = await res.json().catch(() => ({}))
+    if (!res.ok || body.success !== true) {
+      console.error('Client mark removal failed:', body.error)
+      return
+    }
+
+    const clientMarkDetails = Array.isArray(body.data?.clientMarkDetails) ? body.data.clientMarkDetails : []
+    const clientMarkCount = Number(body.data?.clientMarkCount) || 0
+    setPhotos((prev) => prev.map((item) => item.id === photo.id ? {
+      ...item,
+      clientMarkDetails,
+      clientMarkCount,
+      hasClientMarks: body.data?.hasClientMarks === true,
+      clientMarked: item.clientMarked && item.clientMarkDetails?.some((mark) => mark.viewerSessionId === viewerSessionId)
+        ? false
+        : item.clientMarked,
+    } : item))
+  }, [projectId])
 
   const handleRefresh = async () => {
     await Promise.all([refreshPhotos(), refreshFolders()]);
@@ -703,7 +753,15 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
                   />
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  <ColorFilterBar active={colorFilter} onChange={setColorFilter} />
+                  <span className="text-xs font-medium text-muted-foreground">颜色标签</span>
+                  <ColorFilterBar active="all" onChange={() => undefined} selectedColors={colorFilter} onToggleColor={toggleColorFilter} />
+                  <button
+                    type="button"
+                    onClick={() => setClientMarkedFilter((prev) => !prev)}
+                    className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${clientMarkedFilter ? 'bg-foreground text-background' : 'bg-muted text-muted-foreground hover:text-foreground'}`}
+                  >
+                    被客户标记过
+                  </button>
                   <select
                     value={publishFilter}
                     onChange={(e) => setPublishFilter(e.target.value as "all" | "published" | "unpublished")}
@@ -911,6 +969,8 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
                 onDeletePhoto={handleDeleteCurrentVersion}
                 onDeleteAllVersions={handleDeleteAllVersions}
                 onTogglePublish={handleTogglePublish}
+                onToggleAdminColorTag={handleToggleAdminColorTag}
+                onRemoveClientMark={handleRemoveClientMark}
               />
             ) : (
               <p className="py-12 text-center text-sm text-muted-foreground">

@@ -25,6 +25,17 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { getClientHeroImage } from "@/lib/clientWatermark";
 
+const VIEWER_SESSION_STORAGE_KEY = 'filmstein-viewer-session-id'
+
+function getOrCreateViewerSessionId() {
+  if (typeof window === 'undefined') return ''
+  const existing = window.localStorage.getItem(VIEWER_SESSION_STORAGE_KEY)
+  if (existing) return existing
+  const created = window.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`
+  window.localStorage.setItem(VIEWER_SESSION_STORAGE_KEY, created)
+  return created
+}
+
 const EmptyState = ({ message }: { message?: string }) => (
   <div className="flex flex-col items-center justify-center py-20 text-center">
     <p className="text-sm text-muted-foreground">{message ?? "No photos yet."}</p>
@@ -114,6 +125,11 @@ const ClientGallery = ({
   const [galleryMode, setGalleryMode] = useState<ClientGalleryMode>('grid')
   const [splashVisible, setSplashVisible] = useState(false)
   const [splashCountdown, setSplashCountdown] = useState(0)
+  const [viewerSessionId, setViewerSessionId] = useState('')
+
+  useEffect(() => {
+    setViewerSessionId(getOrCreateViewerSessionId())
+  }, [])
 
   useEffect(() => {
     if (!splashVisible) return
@@ -128,7 +144,7 @@ const ClientGallery = ({
   }, [splashVisible])
 
   useEffect(() => {
-    if (!id) return;
+    if (!id || !viewerSessionId) return;
 
     let cancelled = false;
     setLoading(true);
@@ -137,7 +153,7 @@ const ClientGallery = ({
     (async () => {
       try {
         const [projRes, foldersRes] = await Promise.all([
-          fetch(`/api/projects/${id}?publishedOnly=true`),
+          fetch(`/api/projects/${id}?publishedOnly=true&viewerSessionId=${encodeURIComponent(viewerSessionId)}`),
           fetch(`/api/projects/${id}/folders`),
         ]);
         const projBody = await projRes.json();
@@ -183,7 +199,7 @@ const ClientGallery = ({
     return () => {
       cancelled = true;
     };
-  }, [id]);
+  }, [id, viewerSessionId]);
 
   const projectName = project?.name ?? (id ? `Project ${id}` : "Project");
   const projectDescription = project?.description?.trim() || "";
@@ -270,9 +286,9 @@ const ClientGallery = ({
   };
 
   const handleRefresh = async () => {
-    if (!id) return;
+    if (!id || !viewerSessionId) return;
     try {
-      const res = await fetch(`/api/projects/${id}?publishedOnly=true`);
+      const res = await fetch(`/api/projects/${id}?publishedOnly=true&viewerSessionId=${encodeURIComponent(viewerSessionId)}`);
       const body = await res.json();
       if (res.ok && body.success && Array.isArray(body.data?.photos)) {
         setPhotos(body.data.photos as Photo[]);
@@ -285,6 +301,32 @@ const ClientGallery = ({
       // ignore
     }
   };
+
+  const handleToggleClientMark = async (photo: Photo) => {
+    if (!id || !viewerSessionId) return
+
+    const res = await fetch(`/api/photos/${photo.id}/client-mark`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ projectId: id, viewerSessionId }),
+    })
+    const body = await res.json().catch(() => ({}))
+    if (!res.ok || body.success !== true) {
+      alert(body.error || 'Mark update failed')
+      return
+    }
+
+    const marked = body.data?.marked === true
+    const clientMarkCount = Number(body.data?.clientMarkCount) || 0
+    setPhotos((prev) => prev.map((item) => item.id === photo.id
+      ? {
+          ...item,
+          clientMarked: marked,
+          clientMarkCount,
+          hasClientMarks: clientMarkCount > 0,
+        }
+      : item))
+  }
 
   const cycleSort = () => {
     setSortDir((d) => (d === "desc" ? "asc" : "desc"));
@@ -410,6 +452,7 @@ const ClientGallery = ({
                             clientDownloadMode
                             forceSquareCards
                             project={project}
+                            onToggleClientMark={handleToggleClientMark}
                             gridClassName="grid grid-cols-2 gap-1.5 sm:grid-cols-3 sm:gap-2 lg:grid-cols-4 lg:gap-2.5 xl:grid-cols-5"
                           />
                         </div>
@@ -428,6 +471,7 @@ const ClientGallery = ({
                     clientDownloadMode
                     forceSquareCards={galleryMode === 'grid'}
                     project={project}
+                    onToggleClientMark={handleToggleClientMark}
                     gridClassName={galleryMode === 'masonry'
                       ? 'mx-auto max-w-7xl columns-2 gap-1.5 space-y-1.5 sm:columns-3 sm:gap-2 sm:space-y-2 lg:columns-4 lg:gap-2.5 lg:space-y-2.5 xl:columns-5'
                       : 'grid grid-cols-2 gap-1.5 sm:grid-cols-3 sm:gap-2 lg:grid-cols-4 lg:gap-2.5 xl:grid-cols-5 2xl:grid-cols-6'}
@@ -533,7 +577,7 @@ const ClientGallery = ({
                 </>
               )}
 
-              <PhotoGrid photos={filtered} viewMode={viewMode} selectedIds={Array.from(selections)} cardVariant="gallery" clientDownloadMode project={project} />
+              <PhotoGrid photos={filtered} viewMode={viewMode} selectedIds={Array.from(selections)} cardVariant="gallery" clientDownloadMode project={project} onToggleClientMark={handleToggleClientMark} />
             </div>
           </div>
         )}

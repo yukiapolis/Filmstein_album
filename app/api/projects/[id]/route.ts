@@ -6,6 +6,7 @@ import { DeleteObjectCommand } from '@aws-sdk/client-s3'
 import { r2 } from '@/lib/r2/client'
 import fs from 'node:fs/promises'
 import { buildLegacyCopyFromPhotoFile } from '@/lib/photoFileCopies'
+import { getWatermarkVersionSignature } from '@/lib/clientWatermark'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
@@ -16,6 +17,7 @@ export async function GET(req: Request, context: RouteContext) {
     const { id } = await context.params
     const url = new URL(req.url)
     const publishedOnly = url.searchParams.get('publishedOnly') === 'true'
+    const viewerSessionId = url.searchParams.get('viewerSessionId')?.trim() || null
 
     const { data: projectRow, error: projectError } = await supabase
       .from('projects')
@@ -54,11 +56,11 @@ export async function GET(req: Request, context: RouteContext) {
 
     const photoIds = (photoRows ?? []).map((row) => row.global_photo_id)
 
-    let filesByPhotoId = new Map<string, FileRow[]>()
+    const filesByPhotoId = new Map<string, FileRow[]>()
     if (photoIds.length > 0) {
       const { data: fileRows, error: filesError } = await supabase
         .from('photo_files')
-        .select('id, photo_id, file_name, original_file_name, object_key, storage_provider, bucket_name, created_at, branch_type, version_no, file_size_bytes, checksum_sha256, file_copies:photo_file_copies(id, photo_file_id, storage_provider, bucket_name, storage_key, status, checksum_verified, size_bytes, size_verified, is_primary_read_source, last_verified_at, last_error, created_at, updated_at)')
+        .select('id, photo_id, file_name, original_file_name, object_key, storage_provider, bucket_name, created_at, branch_type, version_no, file_size_bytes, checksum_sha256, processing_meta, file_copies:photo_file_copies(id, photo_file_id, storage_provider, bucket_name, storage_key, status, checksum_verified, size_bytes, size_verified, is_primary_read_source, last_verified_at, last_error, created_at, updated_at)')
         .in('photo_id', photoIds)
 
       if (filesError) {
@@ -76,6 +78,69 @@ export async function GET(req: Request, context: RouteContext) {
     }
 
     const project = mapRowToProject(projectRow as Record<string, unknown>)
+    const watermarkVersionSignature = getWatermarkVersionSignature(project)
+
+    const adminColorTagsByPhotoId = new Map<string, string[]>()
+    const clientMarkCounts = new Map<string, number>()
+    const clientMarkDetailsByPhotoId = new Map<string, Array<{ viewer_session_id: string; created_at: string; label: string }>>()
+    const clientMarkedPhotoIds = new Set<string>()
+
+    if (photoIds.length > 0) {
+      const [adminTagsResult, clientMarksResult, viewerMarksResult] = await Promise.all([
+        supabase
+          .from('photo_admin_color_tags')
+          .select('photo_id, color')
+          .eq('project_id', id)
+          .in('photo_id', photoIds),
+        supabase
+          .from('photo_client_marks')
+          .select('photo_id, viewer_session_id, created_at')
+          .eq('project_id', id)
+          .in('photo_id', photoIds),
+        viewerSessionId
+          ? supabase
+              .from('photo_client_marks')
+              .select('photo_id')
+              .eq('project_id', id)
+              .eq('viewer_session_id', viewerSessionId)
+              .in('photo_id', photoIds)
+          : Promise.resolve({ data: [], error: null }),
+      ])
+
+      if (adminTagsResult.error) {
+        return Response.json({ success: false, error: adminTagsResult.error.message }, { status: 500 })
+      }
+      if (clientMarksResult.error) {
+        return Response.json({ success: false, error: clientMarksResult.error.message }, { status: 500 })
+      }
+      if (viewerMarksResult.error) {
+        return Response.json({ success: false, error: viewerMarksResult.error.message }, { status: 500 })
+      }
+
+      for (const row of adminTagsResult.data ?? []) {
+        const list = adminColorTagsByPhotoId.get(row.photo_id) ?? []
+        if (typeof row.color === 'string') list.push(row.color)
+        adminColorTagsByPhotoId.set(row.photo_id, list)
+      }
+
+      for (const row of clientMarksResult.data ?? []) {
+        clientMarkCounts.set(row.photo_id, (clientMarkCounts.get(row.photo_id) ?? 0) + 1)
+        const list = clientMarkDetailsByPhotoId.get(row.photo_id) ?? []
+        const viewerSessionId = typeof row.viewer_session_id === 'string' ? row.viewer_session_id : ''
+        const shortId = viewerSessionId ? viewerSessionId.slice(0, 8) : 'unknown'
+        list.push({
+          viewer_session_id: viewerSessionId,
+          created_at: typeof row.created_at === 'string' ? row.created_at : '',
+          label: `viewer:${shortId}`,
+        })
+        clientMarkDetailsByPhotoId.set(row.photo_id, list)
+      }
+
+      for (const row of viewerMarksResult.data ?? []) {
+        clientMarkedPhotoIds.add(row.photo_id)
+      }
+    }
+
     const photos = (photoRows ?? []).map((row) => {
       const fileRows = filesByPhotoId.get(row.global_photo_id) ?? []
       const latestVersion = getLatestVersionFiles(fileRows)
@@ -84,10 +149,16 @@ export async function GET(req: Request, context: RouteContext) {
 
       return mapRowToPhoto({
         ...(row as Record<string, unknown>),
+        admin_color_tags: adminColorTagsByPhotoId.get(row.global_photo_id) ?? [],
+        client_mark_count: clientMarkCounts.get(row.global_photo_id) ?? 0,
+        client_mark_details: clientMarkDetailsByPhotoId.get(row.global_photo_id) ?? [],
+        client_marked: clientMarkedPhotoIds.has(row.global_photo_id),
         latest_original_file: latestVersion?.byBranch.original ?? null,
         latest_thumb_file: latestVersion?.byBranch.thumb ?? null,
         latest_display_file: latestVersion?.byBranch.display ?? null,
+        latest_client_preview_file: latestVersion?.byBranch.client_preview ?? null,
         first_original_file: firstVersion?.byBranch.original ?? null,
+        project_watermark_signature: watermarkVersionSignature,
         version_count: versionCount,
         latest_version_no: getLatestVersionNo(fileRows),
         first_version_no: getFirstVersionNo(fileRows),

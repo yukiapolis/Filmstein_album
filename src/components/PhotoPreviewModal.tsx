@@ -1,12 +1,12 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 import { X, ChevronLeft, ChevronRight, Download, Heart, Trash2, Info, Loader2 } from "lucide-react";
-import type { Photo } from "@/data/mockData";
+import type { Photo, PhotoClientMarkDetail } from "@/data/mockData";
 import { Button } from "@/components/ui/button";
 import type { Project } from "@/data/mockData";
-import { getClientWatermarkConfig } from "@/lib/clientWatermark";
+import { getClientWatermarkConfig, getWatermarkVersionSignature } from "@/lib/clientWatermark";
 
 interface PhotoPreviewModalProps {
   photos: Photo[];
@@ -18,9 +18,11 @@ interface PhotoPreviewModalProps {
   onTogglePublish?: (photo: Photo, isPublished: boolean) => Promise<void> | void;
   clientDownloadMode?: boolean;
   project?: Project | null;
+  onToggleClientMark?: (photo: Photo) => Promise<void> | void;
+  onRemoveClientMark?: (photo: Photo, viewerSessionId: string) => Promise<void> | void;
 }
 
-const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurrent, onDeleteAllVersions, onTogglePublish, clientDownloadMode = false, project = null }: PhotoPreviewModalProps) => {
+const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurrent, onDeleteAllVersions, onTogglePublish, clientDownloadMode = false, project = null, onToggleClientMark, onRemoveClientMark }: PhotoPreviewModalProps) => {
   const [index, setIndex] = useState(initialIndex);
   const [showDownloadMenu, setShowDownloadMenu] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -30,6 +32,9 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurren
   const [highResRequested, setHighResRequested] = useState(false);
   const [highResLoaded, setHighResLoaded] = useState(false);
   const [highResFailed, setHighResFailed] = useState(false);
+  const [previewSrcOverride, setPreviewSrcOverride] = useState<string | null>(null);
+  const previewOpenedAtRef = useRef<number | null>(null)
+  const imageRequestStartedAtRef = useRef<number | null>(null)
 
   useEffect(() => {
     if (!open) return
@@ -64,15 +69,20 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurren
   }, [])
 
   const photo = photos[index] as Photo & {
+    clientMarkDetails?: PhotoClientMarkDetail[];
     displayUrl?: string;
+    clientPreviewUrl?: string;
     originalUrl?: string;
     retouchedOriginalUrl?: string;
     displayFileId?: string;
+    clientPreviewFileId?: string;
     versionCount?: number;
     latestVersionNo?: number;
   };
 
   const watermarkConfig = getClientWatermarkConfig(project)
+  const watermarkVersionSignature = getWatermarkVersionSignature(project)
+  const debugPreview = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('debug') === '1'
 
   useEffect(() => {
     if (!open || photos.length === 0) return
@@ -80,25 +90,71 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurren
     setHighResRequested(false)
     setHighResLoaded(false)
     setHighResFailed(false)
+    setPreviewSrcOverride(null)
   }, [index, open, photos.length])
 
-  const previewSrc = photo
-    ? (clientDownloadMode
-      ? `/api/photos/${photo.id}/client-render?mode=preview&ts=${photo.id}-${index}`
-      : (photo.displayUrl || photo.file_url || photo.url))
+  const previewFallbackSrc = photo
+    ? `/api/photos/${photo.id}/client-render?mode=preview&disposition=inline&ts=${photo.id}-${index}&wv=${encodeURIComponent(watermarkVersionSignature)}${debugPreview ? '&debug=1' : ''}`
     : ''
+
+  const canUseDirectClientPreview = Boolean(
+    clientDownloadMode
+    && photo?.clientPreviewUrl
+    && (!watermarkConfig.enabled || photo.clientPreviewWatermarkSignature === watermarkVersionSignature)
+  )
+
+  const previewSrc = previewSrcOverride || (photo
+    ? (clientDownloadMode
+      ? (canUseDirectClientPreview ? photo.clientPreviewUrl! : previewFallbackSrc)
+      : (photo.displayUrl || photo.file_url || photo.url))
+    : '')
 
   const highResSrc = photo
     ? (clientDownloadMode
-      ? `/api/photos/${photo.id}/client-render?mode=download&ts=${photo.id}-${index}-hires`
+      ? `/api/photos/${photo.id}/client-render?mode=download&disposition=inline&ts=${photo.id}-${index}-hires&wv=${encodeURIComponent(watermarkVersionSignature)}${debugPreview ? '&debug=1' : ''}`
       : (photo.originalUrl || photo.retouchedOriginalUrl || photo.displayUrl || photo.file_url || photo.url))
     : ''
+
+  const activeSrc = highResRequested ? highResSrc : previewSrc
+  const previewPath = useMemo(() => {
+    if (!clientDownloadMode) return 'non-client-preview'
+    if (highResRequested) return 'client-render-download'
+    if (previewSrcOverride === previewFallbackSrc) return 'client-render-fallback'
+    if (canUseDirectClientPreview && photo?.clientPreviewUrl && previewSrc === photo.clientPreviewUrl) return 'clientPreviewUrl-direct'
+    return 'client-render-preview'
+  }, [clientDownloadMode, highResRequested, previewFallbackSrc, previewSrcOverride, photo?.clientPreviewUrl, previewSrc, canUseDirectClientPreview])
+
+  useEffect(() => {
+    if (!open || !photo) return
+    previewOpenedAtRef.current = performance.now()
+    if (debugPreview) {
+      console.debug('[preview-modal] open', {
+        photoId: photo.id,
+        fileName: photo.fileName,
+        previewPath,
+        previewSrc,
+        previewFallbackSrc,
+      })
+    }
+  }, [open, photo?.id, debugPreview, previewPath, previewSrc, previewFallbackSrc, photo?.fileName])
+
+  useEffect(() => {
+    if (!open || !activeSrc) return
+    imageRequestStartedAtRef.current = performance.now()
+    if (debugPreview) {
+      console.debug('[preview-modal] image-request-start', {
+        photoId: photo?.id,
+        previewPath,
+        src: activeSrc,
+      })
+    }
+  }, [open, activeSrc, debugPreview, previewPath, photo?.id])
 
   if (!open || photos.length === 0 || !portalReady || !photo) return null;
 
   const openDownload = async (variant: "current" | "retouched-original" | "original" | "client-display" | "client-original") => {
     const url = clientDownloadMode
-      ? `/api/photos/${photo.id}/client-render?mode=${variant === 'client-original' ? 'download' : 'download'}`
+      ? `/api/photos/${photo.id}/client-render?mode=${variant === 'client-display' ? 'preview' : 'download'}&disposition=attachment&wv=${encodeURIComponent(watermarkVersionSignature)}`
       : `/api/photos/${photo.id}/download?variant=${variant}`;
     const check = await fetch(url, { method: "HEAD" });
     if (!check.ok) {
@@ -132,8 +188,13 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurren
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[1000] flex min-h-[100dvh] items-center justify-center overflow-hidden bg-black/80 backdrop-blur-md"
-      style={{ paddingTop: 'env(safe-area-inset-top)' }}
+      className="fixed inset-0 z-[1000] flex h-[100dvh] w-screen items-center justify-center overflow-hidden bg-black/90 backdrop-blur-md"
+      style={{
+        paddingTop: 'env(safe-area-inset-top)',
+        paddingBottom: 'env(safe-area-inset-bottom)',
+        paddingLeft: 'env(safe-area-inset-left)',
+        paddingRight: 'env(safe-area-inset-right)',
+      }}
       onClick={onClose}
     >
       <div className="absolute left-4 top-4 z-10 flex items-center gap-2">
@@ -145,9 +206,23 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurren
       </div>
 
       <div className="absolute top-4 right-4 z-10 flex items-center gap-2">
-        <Button size="icon" variant="ghost" className="text-white hover:bg-white/10" onClick={(e) => { e.stopPropagation(); }}>
-          <Heart className="h-5 w-5" />
-        </Button>
+        {clientDownloadMode && onToggleClientMark ? (
+          <Button
+            size="icon"
+            variant="ghost"
+            className="text-white hover:bg-white/10"
+            onClick={(e) => {
+              e.stopPropagation();
+              void onToggleClientMark(photo);
+            }}
+          >
+            <Heart className={`h-5 w-5 ${photo.clientMarked ? 'fill-rose-500 text-rose-400' : ''}`} />
+          </Button>
+        ) : (
+          <Button size="icon" variant="ghost" className="text-white hover:bg-white/10" onClick={(e) => { e.stopPropagation(); }}>
+            <Heart className="h-5 w-5" />
+          </Button>
+        )}
         {onTogglePublish && (
           <Button
             size="sm"
@@ -250,8 +325,8 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurren
         <ChevronLeft className="h-6 w-6" />
       </button>
 
-      <div className="max-h-[85dvh] w-[min(92vw,1200px)] transform-gpu" onClick={(e) => e.stopPropagation()}>
-        <div className="relative flex max-h-[85vh] items-center justify-center overflow-hidden rounded-xl bg-black/40">
+      <div className="max-h-[calc(100dvh-7rem)] w-[min(92vw,1200px)] transform-gpu" onClick={(e) => e.stopPropagation()}>
+        <div className="relative flex max-h-[calc(100dvh-7rem)] items-center justify-center overflow-hidden bg-transparent">
           {imageLoading && (
             <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/35 backdrop-blur-sm">
               <div className="flex items-center gap-3 rounded-full bg-white/10 px-4 py-2 text-sm text-white">
@@ -261,14 +336,45 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurren
             </div>
           )}
           <img
-            src={highResRequested ? highResSrc : previewSrc}
+            src={activeSrc}
             alt={photo.fileName}
-            className="max-h-[85vh] max-w-full object-contain"
-            onLoad={() => {
+            className="max-h-[calc(100dvh-7rem)] max-w-full object-contain"
+            onLoad={(event) => {
               setImageLoading(false)
               if (highResRequested) setHighResLoaded(true)
+              if (debugPreview) {
+                const requestMs = imageRequestStartedAtRef.current == null ? null : Math.round(performance.now() - imageRequestStartedAtRef.current)
+                const totalSinceOpenMs = previewOpenedAtRef.current == null ? null : Math.round(performance.now() - previewOpenedAtRef.current)
+                const headers = event.currentTarget.currentSrc.includes('/api/photos/')
+                  ? 'inspect network response headers for X-Debug-*'
+                  : 'direct image request'
+                console.debug('[preview-modal] image-loaded', {
+                  photoId: photo.id,
+                  previewPath,
+                  src: event.currentTarget.currentSrc,
+                  requestMs,
+                  totalSinceOpenMs,
+                  headers,
+                })
+              }
             }}
-            onError={() => {
+            onError={(event) => {
+              if (debugPreview) {
+                const requestMs = imageRequestStartedAtRef.current == null ? null : Math.round(performance.now() - imageRequestStartedAtRef.current)
+                const totalSinceOpenMs = previewOpenedAtRef.current == null ? null : Math.round(performance.now() - previewOpenedAtRef.current)
+                console.debug('[preview-modal] image-error', {
+                  photoId: photo.id,
+                  previewPath,
+                  src: event.currentTarget.currentSrc || activeSrc,
+                  requestMs,
+                  totalSinceOpenMs,
+                })
+              }
+              if (!highResRequested && clientDownloadMode && canUseDirectClientPreview && photo.clientPreviewUrl && previewSrc === photo.clientPreviewUrl) {
+                setPreviewSrcOverride(previewFallbackSrc)
+                setImageLoading(true)
+                return
+              }
               setImageLoading(false)
               if (highResRequested) {
                 setHighResFailed(true)
@@ -317,9 +423,38 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurren
       )}
 
       {showInfo && (
-        <div className="absolute bottom-14 left-1/2 z-20 w-[min(92vw,520px)] -translate-x-1/2 rounded-xl border border-white/10 bg-black/65 px-4 py-3 text-white backdrop-blur">
+        <div className="absolute bottom-14 left-1/2 z-20 w-[min(92vw,560px)] -translate-x-1/2 rounded-xl border border-white/10 bg-black/65 px-4 py-3 text-white backdrop-blur">
           <p className="text-sm font-medium">{photo.fileName}</p>
           <p className="mt-1 text-xs text-white/75">{photo.uploadedAt || 'Unknown time'}</p>
+          {!clientDownloadMode && (
+            <div className="mt-3 space-y-2">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-xs font-medium uppercase tracking-wide text-white/75">客户标记详情</p>
+                <span className="text-xs text-white/60">{photo.clientMarkCount ?? photo.clientMarkDetails?.length ?? 0} marks</span>
+              </div>
+              {(photo.clientMarkDetails?.length ?? 0) > 0 ? (
+                <div className="flex flex-wrap gap-2">
+                  {photo.clientMarkDetails?.map((mark) => (
+                    <button
+                      key={mark.viewerSessionId}
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        void onRemoveClientMark?.(photo, mark.viewerSessionId)
+                      }}
+                      className="group inline-flex items-center gap-1 rounded-full border border-white/15 px-2.5 py-1 text-xs text-white/85 transition hover:border-white/35 hover:bg-white/10"
+                      title={`Remove ${mark.label}`}
+                    >
+                      <span>{mark.label}</span>
+                      <span className="hidden text-white/60 group-hover:inline">×</span>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-white/60">暂无客户标记</p>
+              )}
+            </div>
+          )}
         </div>
       )}
 
