@@ -2,6 +2,7 @@ import os from 'node:os'
 import path from 'node:path'
 import fs from 'node:fs/promises'
 import sharp from 'sharp'
+import type { SupabaseServerClient } from '@/lib/supabase/server'
 
 export type FtpIngestConfig = {
   enabled?: boolean
@@ -20,24 +21,6 @@ export type FtpIngestSummary = {
 }
 
 type JsonObject = Record<string, unknown>
-type SupabaseResult<T> = { data: T | null }
-
-type SupabaseFilterBuilder<T> = PromiseLike<SupabaseResult<T>> & {
-  eq: (column: string, value: unknown) => SupabaseFilterBuilder<T>
-  gte: (column: string, value: string) => SupabaseFilterBuilder<T>
-  or: (filters: string) => SupabaseFilterBuilder<T>
-  maybeSingle: () => Promise<SupabaseResult<JsonObject>>
-}
-
-type SupabaseTableBuilder = {
-  select: (columns: string) => SupabaseFilterBuilder<JsonObject[]>
-  update: (values: JsonObject) => SupabaseFilterBuilder<JsonObject[]>
-  insert: (values: JsonObject[]) => Promise<unknown>
-}
-
-type SupabaseAdminLike = {
-  from: (table: string) => SupabaseTableBuilder
-}
 
 function asRecord(value: unknown): JsonObject | null {
   return value && typeof value === 'object' && !Array.isArray(value)
@@ -47,6 +30,10 @@ function asRecord(value: unknown): JsonObject | null {
 
 function toStringValue(value: unknown): string {
   return typeof value === 'string' ? value : ''
+}
+
+function getErrorMessage(value: unknown, fallback: string): string {
+  return typeof value === 'string' && value.trim() ? value : fallback
 }
 
 async function postJson(url: string, body: unknown) {
@@ -107,7 +94,7 @@ async function validateDownloadedImage(params: { tempPath: string; fileName: str
 async function cleanupPartialUpload(params: {
   uploadBaseUrl: string
   projectId: string
-  supabaseAdmin: SupabaseAdminLike
+  supabaseAdmin: SupabaseServerClient
   recentBeforeIso: string
   fileName: string
 }) {
@@ -135,7 +122,7 @@ export async function runProjectFtpIngest(params: {
   projectId: string
   ftpIngest: FtpIngestConfig
   uploadBaseUrl: string
-  supabaseAdmin: SupabaseAdminLike
+  supabaseAdmin: SupabaseServerClient
 }) : Promise<FtpIngestSummary> {
   const config = params.ftpIngest
   if (!config.enabled) throw new Error('FTP ingest is not enabled')
@@ -211,7 +198,7 @@ export async function runProjectFtpIngest(params: {
       }
 
       const claim = await postJson(`${baseUrl}/api/ingest/jobs/${encodeURIComponent(jobId)}/claim`, {})
-      if (!claim.res.ok) throw new Error(claim.json?.error || `claim failed (${claim.res.status})`)
+      if (!claim.res.ok) throw new Error(getErrorMessage(claim.json?.error, `claim failed (${claim.res.status})`))
 
       const fileRes = await fetch(`${baseUrl}/api/ingest/jobs/${encodeURIComponent(jobId)}/file`)
       if (!fileRes.ok) {
@@ -254,7 +241,7 @@ export async function runProjectFtpIngest(params: {
             recentBeforeIso: beforeUploadIso,
             fileName,
           })
-          await postJson(`${baseUrl}/api/ingest/jobs/${encodeURIComponent(jobId)}/fail`, { error: uploadBody?.error || `upload failed (${uploadRes.status})` })
+          await postJson(`${baseUrl}/api/ingest/jobs/${encodeURIComponent(jobId)}/fail`, { error: getErrorMessage(uploadBody?.error, `upload failed (${uploadRes.status})`) })
           await params.supabaseAdmin.from('ftp_ingest_import_jobs').update({ status: 'failed', updated_at: new Date().toISOString() }).eq('project_id', params.projectId).eq('buffer_job_id', jobId)
           summary.failedCount++
           summary.errors.push(`${jobId}: ${uploadBody?.error || 'upload failed'}`)
