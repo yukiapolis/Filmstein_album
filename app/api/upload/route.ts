@@ -6,6 +6,7 @@ import { supabase } from '../../../src/lib/supabase/server'
 import { r2 } from '../../../src/lib/r2/client'
 import { DeleteObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3'
 import { extractPhotoIdFromFileName, extractVersionNoFromFileName, looksLikeRetouchFile, normalizeBaseName, type UploadAnalysisResult } from '@/lib/uploadAnalysis'
+import { BRANCH_TYPE_CLIENT_PREVIEW, buildWatermarkedClientPreview, getClientPreviewFileName, getClientPreviewKey } from '@/lib/clientPreviewAsset'
 
 const BRANCH_TYPE_ORIGINAL = 'original';
 const BRANCH_TYPE_RAW = 'raw';
@@ -41,6 +42,12 @@ function getOriginalsRoot() {
 
 function sha256(buffer: Buffer) {
   return crypto.createHash('sha256').update(buffer).digest('hex');
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
 }
 
 async function getImageMetadata(buffer: Buffer) {
@@ -143,6 +150,100 @@ async function uploadToR2(params: {
 
   const base = (process.env.R2_PUBLIC_BASE_URL || process.env.NEXT_PUBLIC_PHOTO_PUBLIC_BASE_URL || '').replace(/\/+$/, '');
   return `${base}/${params.key}`;
+}
+
+async function buildClientPreviewAsset(params: {
+  projectId: string;
+  photoId: string;
+  versionNo: number;
+  versionedBaseName: string;
+  originalFileName: string;
+  displayBuffer: Buffer;
+  supabaseClient: typeof supabase;
+}) {
+  const { data: projectRow, error: projectError } = await params.supabaseClient
+    .from('projects')
+    .select('project_assets, visual_settings')
+    .eq('id', params.projectId)
+    .maybeSingle();
+
+  if (projectError) {
+    return { ok: false as const, skipped: false as const, reason: `project watermark config lookup failed: ${projectError.message}` };
+  }
+
+  const projectAssets = asRecord(projectRow?.project_assets) ?? {};
+  const watermark = asRecord(asRecord(projectRow?.visual_settings)?.watermark) ?? {};
+  const watermarkLogo = asRecord(projectAssets.watermark_logo);
+  const logoUrl = typeof watermarkLogo?.url === 'string' ? watermarkLogo.url : undefined;
+  const watermarkEnabled = Boolean(watermark.enabled && logoUrl);
+
+  if (!watermarkEnabled || !logoUrl) {
+    return { ok: false as const, skipped: true as const, reason: 'watermark disabled or logo missing' };
+  }
+
+  const logoRes = await fetch(logoUrl);
+  if (!logoRes.ok) {
+    return { ok: false as const, skipped: false as const, reason: `watermark logo fetch failed (${logoRes.status})` };
+  }
+
+  const logoBuffer = Buffer.from(await logoRes.arrayBuffer());
+  const outputBuffer = await buildWatermarkedClientPreview({
+    sourceBuffer: params.displayBuffer,
+    logoBuffer,
+    watermark,
+    mode: 'preview',
+  });
+
+  const fileName = getClientPreviewFileName(params.versionedBaseName);
+  const key = getClientPreviewKey({
+    projectId: params.projectId,
+    photoId: params.photoId,
+    versionedBaseName: params.versionedBaseName,
+  });
+
+  const url = await uploadToR2({
+    key,
+    body: outputBuffer,
+    contentType: 'image/jpeg',
+  });
+
+  const metadata = await getImageMetadata(outputBuffer);
+  const row = {
+    photo_id: params.photoId,
+    branch_type: BRANCH_TYPE_CLIENT_PREVIEW,
+    version_no: params.versionNo,
+    variant_type: 1,
+    file_name: fileName,
+    original_file_name: params.originalFileName,
+    storage_provider: 'r2',
+    bucket_name: process.env.R2_BUCKET_NAME!,
+    object_key: url,
+    mime_type: 'image/jpeg',
+    file_size_bytes: outputBuffer.length,
+    width: metadata.width,
+    height: metadata.height,
+    checksum_sha256: sha256(outputBuffer),
+    exif: metadata.exif,
+    processing_meta: { derived_from: 'display', preset: 'client-preview-watermarked-v1' },
+    created_by: null,
+  };
+
+  const { data: insertedRow, error: insertError } = await params.supabaseClient
+    .from('photo_files')
+    .insert([row])
+    .select('id, object_key')
+    .single();
+
+  if (insertError || !insertedRow) {
+    await deleteStoredAsset({
+      storage_provider: 'r2',
+      bucket_name: process.env.R2_BUCKET_NAME!,
+      object_key: url,
+    }).catch(() => undefined)
+    return { ok: false as const, skipped: false as const, reason: insertError?.message || 'Failed to create client preview row' };
+  }
+
+  return { ok: true as const, id: insertedRow.id, url: insertedRow.object_key as string };
 }
 
 async function deleteStoredAsset(file: { storage_provider?: string | null; bucket_name?: string | null; object_key?: string | null }) {
@@ -300,6 +401,7 @@ export async function POST(req: Request) {
 
     let targetPhotoId = photoId?.trim() || null;
     let targetProjectId = projectId?.trim() || null;
+    let createdNewPhoto = false;
 
     if (!targetPhotoId) {
       const embeddedPhotoId = file.name.match(GLOBAL_PHOTO_ID_RE)?.[0]?.toUpperCase() || null;
@@ -358,6 +460,8 @@ export async function POST(req: Request) {
       if (photoError) {
         return new Response(JSON.stringify({ success: false, error: photoError.message }), { status: 500 });
       }
+
+      createdNewPhoto = true;
     }
 
     if (!targetProjectId) {
@@ -494,7 +598,31 @@ export async function POST(req: Request) {
       original: null,
       thumb: null,
       display: null,
+      clientPreview: null,
     };
+    const createdStoredAssets: Array<{ storage_provider: string; bucket_name: string | null; object_key: string | null }> = [{
+      storage_provider: 'local',
+      bucket_name: 'local-originals',
+      object_key: originalLocalPath,
+    }];
+    const warnings: string[] = [];
+
+    const rollbackUploadArtifacts = async (reason: string) => {
+      for (const asset of createdStoredAssets.slice().reverse()) {
+        await deleteStoredAsset(asset).catch(() => undefined)
+      }
+
+      const fileIds = Object.values(createdFileIds).filter((value): value is string => Boolean(value))
+      if (fileIds.length > 0) {
+        await supabase.from('photo_files').delete().in('id', fileIds)
+      }
+
+      if (createdNewPhoto && targetPhotoId) {
+        await supabase.from('photos').delete().eq('global_photo_id', targetPhotoId)
+      }
+
+      return new Response(JSON.stringify({ success: false, error: reason }), { status: 500 })
+    }
 
     const { data: originalFileRow, error: originalFileError } = await supabase
       .from('photo_files')
@@ -529,12 +657,14 @@ export async function POST(req: Request) {
         body: thumbBuffer,
         contentType: 'image/jpeg',
       });
+      createdStoredAssets.push({ storage_provider: 'r2', bucket_name: process.env.R2_BUCKET_NAME!, object_key: thumbUrl });
 
       displayUrl = await uploadToR2({
         key: displayKey,
         body: displayBuffer,
         contentType: isRetouchUpload ? (file.type || 'application/octet-stream') : 'image/jpeg',
       });
+      createdStoredAssets.push({ storage_provider: 'r2', bucket_name: process.env.R2_BUCKET_NAME!, object_key: displayUrl });
 
       if (!isRetouchUpload && displayPreset === 'original') {
         await saveLocalAsset({
@@ -603,6 +733,25 @@ export async function POST(req: Request) {
         return new Response(JSON.stringify({ success: false, error: displayError?.message || 'Failed to create display row' }), { status: 500 });
       }
       createdFileIds.display = displayRow.id;
+
+      const clientPreviewAsset = await buildClientPreviewAsset({
+        projectId: targetProjectId,
+        photoId: targetPhotoId,
+        versionNo: nextVersionNo,
+        versionedBaseName,
+        originalFileName: file.name,
+        displayBuffer,
+        supabaseClient: supabase,
+      });
+
+      if (clientPreviewAsset.ok) {
+        createdFileIds.clientPreview = clientPreviewAsset.id;
+      } else if (clientPreviewAsset.skipped) {
+        warnings.push(`client preview asset skipped: ${clientPreviewAsset.reason}`);
+      } else {
+        console.warn('[upload] client preview asset generation failed:', clientPreviewAsset.reason, { projectId: targetProjectId, photoId: targetPhotoId, versionNo: nextVersionNo });
+        return rollbackUploadArtifacts(`client preview asset generation failed: ${clientPreviewAsset.reason}`);
+      }
     }
 
     const photoUpdates: Record<string, unknown> = {
@@ -634,8 +783,10 @@ export async function POST(req: Request) {
       originalFileId: createdFileIds.original,
       thumbFileId: createdFileIds.thumb,
       displayFileId: createdFileIds.display,
+      clientPreviewFileId: createdFileIds.clientPreview,
       overwriteOriginal,
       overwrittenVersionCleanupCount,
+      warnings,
     }), { status: 200 });
   } catch (err) {
     console.error('upload error:', err);

@@ -17,19 +17,36 @@ export default function Home() {
   const [page, setPage] = useState(1);
   const [dialogOpen, setDialogOpen] = useState(false);
 
-  const refreshProjects = useCallback(async () => {
+  const fetchProjects = useCallback(async (): Promise<Project[]> => {
     const res = await fetch("/api/projects");
     const json: unknown = await res.json();
-    if (typeof json !== "object" || json === null) return;
+    if (typeof json !== "object" || json === null) return [];
     const body = json as { success?: boolean; data?: unknown };
-    if (!body.success || !Array.isArray(body.data)) return;
-    const mapped = body.data.map((row) => mapRowToProject(row as Record<string, unknown>));
-    setProjects(mapped);
+    if (!body.success || !Array.isArray(body.data)) return [];
+    return body.data.map((row) => mapRowToProject(row as Record<string, unknown>));
   }, []);
 
+  const refreshProjects = useCallback(async () => {
+    const mapped = await fetchProjects();
+    setProjects(mapped);
+  }, [fetchProjects]);
+
   useEffect(() => {
-    refreshProjects();
-  }, [refreshProjects]);
+    let cancelled = false;
+
+    const loadProjects = async () => {
+      const mapped = await fetchProjects();
+      if (!cancelled) {
+        setProjects(mapped);
+      }
+    };
+
+    void loadProjects();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [fetchProjects]);
 
   const filteredProjects = useMemo(() => {
     const keyword = searchQuery.trim().toLowerCase();
@@ -49,9 +66,10 @@ export default function Home() {
     return filteredProjects.slice(start, start + pageSize);
   }, [filteredProjects, currentPage]);
 
-  useEffect(() => {
+  const handleSearchChange = useCallback((value: string) => {
+    setSearchQuery(value);
     setPage(1);
-  }, [searchQuery]);
+  }, []);
 
   return (
     <div className="min-h-screen bg-surface">
@@ -68,7 +86,7 @@ export default function Home() {
           </Button>
         </div>
         <div className="max-w-sm">
-          <SearchBar value={searchQuery} onChange={setSearchQuery} />
+          <SearchBar value={searchQuery} onChange={handleSearchChange} />
         </div>
         <ProjectGrid projects={pagedProjects} />
         <div className="flex items-center justify-between rounded-xl border border-border bg-card px-4 py-3">

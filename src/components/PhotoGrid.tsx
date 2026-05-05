@@ -1,7 +1,9 @@
 "use client";
 
 import { useState, useMemo } from "react";
+import { Heart } from "lucide-react";
 import type { Photo, Album, Project } from "@/data/mockData";
+import { colorLabelMap } from "@/data/mockData";
 import PhotoCard from "@/components/PhotoCard";
 import PhotoPreviewModal from "@/components/PhotoPreviewModal";
 import EmptyPhotosState from "@/components/EmptyPhotosState";
@@ -26,6 +28,9 @@ interface PhotoGridProps {
   onTogglePublish?: (photo: Photo, isPublished: boolean) => Promise<void> | void;
   forceSquareCards?: boolean;
   project?: Project | null;
+  onToggleClientMark?: (photo: Photo) => Promise<void> | void;
+  onRemoveClientMark?: (photo: Photo, viewerSessionId: string) => Promise<void> | void;
+  onToggleAdminColorTag?: (photoId: string, color: "red" | "green" | "blue" | "yellow" | "purple") => void;
 }
 
 const PhotoGrid = ({
@@ -44,6 +49,9 @@ const PhotoGrid = ({
   onTogglePublish,
   forceSquareCards = false,
   project = null,
+  onToggleClientMark,
+  onRemoveClientMark,
+  onToggleAdminColorTag,
 }: PhotoGridProps) => {
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
 
@@ -80,9 +88,25 @@ const PhotoGrid = ({
                     {isPhotoSelected(photo.id) && <span className="text-xs text-white">✓</span>}
                   </button>
                 )}
-                <img src={listThumbSrc} alt={photo.fileName} className="h-10 w-10 shrink-0 rounded object-cover" />
+                <div className="relative shrink-0">
+                  <img src={listThumbSrc} alt={photo.fileName} className="h-10 w-10 rounded object-cover" />
+                  {photo.clientMarked && (
+                    <span className="absolute -right-1 -top-1 rounded-full bg-black/70 p-0.5 text-white shadow-sm">
+                      <Heart className="h-2.5 w-2.5 fill-current text-rose-400" />
+                    </span>
+                  )}
+                </div>
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium text-foreground">{photo.fileName}</p>
+                  <div className="flex items-center gap-2">
+                    <p className="truncate text-sm font-medium text-foreground">{photo.fileName}</p>
+                    {(photo.adminColorTags ?? []).length > 0 && (
+                      <div className="flex items-center gap-1 rounded-full bg-muted px-1.5 py-0.5">
+                        {(photo.adminColorTags ?? []).map((tag) => (
+                          <span key={tag} className={`h-2 w-2 rounded-full ${colorLabelMap[tag].bg}`} />
+                        ))}
+                      </div>
+                    )}
+                  </div>
                   <p className="text-xs text-muted-foreground">{photo.tag}</p>
                 </div>
                 <p className="hidden text-xs text-muted-foreground sm:block">{photo.uploadedAt}</p>
@@ -102,6 +126,8 @@ const PhotoGrid = ({
             onTogglePublish={onTogglePublish}
             clientDownloadMode={clientDownloadMode}
             project={project}
+            onToggleClientMark={onToggleClientMark}
+            onRemoveClientMark={onRemoveClientMark}
           />
         )}
       </>
@@ -128,6 +154,7 @@ const PhotoGrid = ({
               hideDownloadButton={hideDownloadButton}
               clientDownloadMode={clientDownloadMode}
               forceSquare={forceSquareCards}
+              onToggleAdminColorTag={onToggleAdminColorTag}
             />
           </div>
         ))}
@@ -144,6 +171,8 @@ const PhotoGrid = ({
           onTogglePublish={onTogglePublish}
           clientDownloadMode={clientDownloadMode}
           project={project}
+          onToggleClientMark={onToggleClientMark}
+          onRemoveClientMark={onRemoveClientMark}
         />
       )}
     </>

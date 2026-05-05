@@ -1,9 +1,11 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { X, Upload, Loader2, Download, Trash2, ChevronDown, ChevronRight } from "lucide-react";
 import type { Project, ProjectType, ProjectStatus } from "@/data/mockData";
 import { Button } from "@/components/ui/button";
+import { buildProjectAssetApiUrl, type ProjectAssetKey } from '@/lib/projectAssetUrl'
+import { clampWatermarkOpacity, clampWatermarkScale, getClientWatermarkConfig, getWatermarkStyle } from '@/lib/clientWatermark'
 
 interface ProjectEditDialogProps {
   open: boolean;
@@ -13,7 +15,7 @@ interface ProjectEditDialogProps {
 }
 
 type AssetKey = 'cover' | 'banner' | 'splash_poster' | 'loading_gif' | 'watermark_logo'
-type AssetValue = { url?: string; file_name?: string; mime_type?: string; file_size_bytes?: number; duration_seconds?: number }
+type AssetValue = { url?: string; file_name?: string; mime_type?: string; file_size_bytes?: number; duration_seconds?: number; version_token?: string }
 type ProjectAssetsState = NonNullable<Project['project_assets']>
 
 const PROJECT_TYPES: ProjectType[] = ["Wedding", "Event", "Campaign"];
@@ -41,39 +43,9 @@ function formatBytesToMb(bytes: number) {
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`
 }
 
-function clampOpacity(value: number) {
-  if (Number.isNaN(value)) return 1
-  return Math.min(1, Math.max(0, value))
-}
 
-function getWatermarkPreviewStyle(position: string, offsetX: number, offsetY: number, scale: number, opacity: number) {
-  const safeScale = Math.max(0.2, scale || 1)
-  const base = {
-    width: `${96 * safeScale}px`,
-    opacity: clampOpacity(opacity),
-  } as const
-
-  if (position === 'custom') {
-    return {
-      ...base,
-      left: `calc(50% + ${offsetX}px)`,
-      top: `calc(50% + ${offsetY}px)`,
-      transform: 'translate(-50%, -50%)',
-    }
-  }
-
-  const vertical = position.startsWith('top') ? 'top' : 'bottom'
-  const horizontal = position.endsWith('left') ? 'left' : 'right'
-
-  return {
-    ...base,
-    [vertical]: `${16 + offsetY}px`,
-    [horizontal]: `${16 + offsetX}px`,
-  }
-}
-
-function AssetPreview({ asset, label }: { asset?: AssetValue; label: string }) {
-  if (!asset?.url) {
+function AssetPreview({ asset, label, previewUrl }: { asset?: AssetValue; label: string; previewUrl?: string }) {
+  if (!asset?.url && !previewUrl) {
     return (
       <div className="flex aspect-[4/3] w-28 items-center justify-center rounded-md border border-dashed border-border bg-muted text-[11px] text-muted-foreground">
         No preview
@@ -83,7 +55,7 @@ function AssetPreview({ asset, label }: { asset?: AssetValue; label: string }) {
 
   return (
     <div className="overflow-hidden rounded-md border border-border bg-muted">
-      <img src={asset.url} alt={label} className="aspect-[4/3] w-28 object-cover" />
+      <img src={previewUrl || asset?.url || ''} alt={label} className="aspect-[4/3] w-28 object-cover" />
     </div>
   )
 }
@@ -101,6 +73,7 @@ function AssetSection({
   uploading,
   children,
   alwaysVisible = false,
+  previewUrl,
 }: {
   title: string
   assetKey: AssetKey
@@ -114,6 +87,7 @@ function AssetSection({
   uploading: boolean
   children?: React.ReactNode
   alwaysVisible?: boolean
+  previewUrl?: string
 }) {
   const showContent = alwaysVisible || enabled
 
@@ -165,7 +139,7 @@ function AssetSection({
       {showContent && expanded ? (
         <div className="border-t border-border px-4 py-4">
           <div className="flex flex-wrap items-start gap-4">
-            <AssetPreview asset={asset} label={title} />
+            <AssetPreview asset={asset} label={title} previewUrl={previewUrl} />
             <div className="min-w-[180px] flex-1 space-y-2 text-xs text-muted-foreground">
               <p>{asset?.url ? 'Uploaded and linked to project assets.' : 'No file uploaded yet.'}</p>
               {asset?.url ? <p className="break-all">{asset.url}</p> : null}
@@ -226,6 +200,9 @@ export default function ProjectEditDialog({
   const [gifExpanded, setGifExpanded] = useState(false);
   const [watermarkSectionEnabled, setWatermarkSectionEnabled] = useState(Boolean(project.project_assets?.watermark_logo?.url || project.visual_settings?.watermark?.enabled));
   const [watermarkExpanded, setWatermarkExpanded] = useState(false);
+  const [previewPhotoUrl, setPreviewPhotoUrl] = useState<string | null>(null)
+  const [useAlbumPhotoPreview, setUseAlbumPhotoPreview] = useState(false)
+  const [watermarkLogoAspectRatio, setWatermarkLogoAspectRatio] = useState(2)
 
   const handleScanOrphans = async () => {
     setScanningOrphans(true);
@@ -298,6 +275,46 @@ export default function ProjectEditDialog({
     }
   }, [open, ftpEnabled]);
 
+  useEffect(() => {
+    if (!open) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await fetch(`/api/projects/${project.id}`)
+        const body = await res.json().catch(() => null)
+        const firstPhoto = Array.isArray(body?.data?.photos) ? body.data.photos[0] : null
+        const nextPreviewPhotoUrl = firstPhoto?.displayUrl || firstPhoto?.file_url || firstPhoto?.url || null
+        if (!cancelled) {
+          setPreviewPhotoUrl(nextPreviewPhotoUrl)
+          setUseAlbumPhotoPreview(Boolean(nextPreviewPhotoUrl))
+        }
+      } catch {
+        if (!cancelled) {
+          setPreviewPhotoUrl(null)
+          setUseAlbumPhotoPreview(false)
+        }
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [open, project.id])
+
+  useEffect(() => {
+    const previewUrl = buildProjectAssetApiUrl(project.id, 'watermark_logo', projectAssets.watermark_logo?.version_token || projectAssets.watermark_logo?.file_name || projectAssets.watermark_logo?.file_size_bytes || '1')
+    if (!projectAssets.watermark_logo?.url) {
+      setWatermarkLogoAspectRatio(2)
+      return
+    }
+    const img = new Image()
+    img.onload = () => {
+      setWatermarkLogoAspectRatio(img.naturalWidth > 0 && img.naturalHeight > 0 ? img.naturalWidth / img.naturalHeight : 2)
+    }
+    img.onerror = () => setWatermarkLogoAspectRatio(2)
+    img.src = previewUrl
+  }, [project.id, projectAssets.watermark_logo?.url, projectAssets.watermark_logo?.version_token, projectAssets.watermark_logo?.file_name, projectAssets.watermark_logo?.file_size_bytes])
+
   const handleAssetUpload = async (assetType: AssetKey, file: File | null) => {
     if (!file) return;
     setAssetUploading(assetType);
@@ -340,6 +357,7 @@ export default function ProjectEditDialog({
             file_name: body.data.fileName,
             mime_type: file.type || undefined,
             file_size_bytes: body.data.size,
+            version_token: body.data.versionToken,
           },
         }
         return next
@@ -431,8 +449,8 @@ export default function ProjectEditDialog({
               position: watermarkPosition,
               offset_x: Number(watermarkOffsetX) || 0,
               offset_y: Number(watermarkOffsetY) || 0,
-              scale: Number(watermarkScale) || 1,
-              opacity: clampOpacity(Number(watermarkOpacity)),
+              scale: clampWatermarkScale(Number(watermarkScale) || 1),
+              opacity: clampWatermarkOpacity(Number(watermarkOpacity)),
             },
           },
         }),
@@ -463,8 +481,8 @@ export default function ProjectEditDialog({
             position: watermarkPosition,
             offset_x: Number(watermarkOffsetX) || 0,
             offset_y: Number(watermarkOffsetY) || 0,
-            scale: Number(watermarkScale) || 1,
-            opacity: clampOpacity(Number(watermarkOpacity)),
+            scale: clampWatermarkScale(Number(watermarkScale) || 1),
+            opacity: clampWatermarkOpacity(Number(watermarkOpacity)),
           },
         },
       });
@@ -476,15 +494,42 @@ export default function ProjectEditDialog({
     }
   };
 
-  if (!open) return null;
+  const getAssetPreviewUrl = (assetKey: ProjectAssetKey, asset?: AssetValue) => {
+    if (!asset?.url) return undefined
+    return buildProjectAssetApiUrl(project.id, assetKey, asset.version_token || asset.file_name || asset.file_size_bytes || '1')
+  }
 
-  const watermarkPreviewStyle = getWatermarkPreviewStyle(
-    watermarkPosition,
-    Number(watermarkOffsetX) || 0,
-    Number(watermarkOffsetY) || 0,
-    Number(watermarkScale) || 1,
-    Number(watermarkOpacity) || 1,
-  )
+  const watermarkPreviewConfig = useMemo(() => ({
+    ...getClientWatermarkConfig({
+      ...project,
+      project_assets: {
+        ...(project.project_assets || {}),
+        ...projectAssets,
+      },
+      visual_settings: {
+        watermark: {
+          enabled: watermarkSectionEnabled ? watermarkEnabled : false,
+          position: watermarkPosition,
+          offset_x: Number(watermarkOffsetX) || 0,
+          offset_y: Number(watermarkOffsetY) || 0,
+          scale: clampWatermarkScale(Number(watermarkScale) || 1),
+          opacity: clampWatermarkOpacity(Number(watermarkOpacity)),
+        },
+      },
+    }),
+  }), [project, projectAssets, watermarkEnabled, watermarkOffsetX, watermarkOffsetY, watermarkOpacity, watermarkPosition, watermarkScale, watermarkSectionEnabled])
+
+  const watermarkPreviewStyle = useMemo(() => getWatermarkStyle({
+    config: watermarkPreviewConfig,
+    baseWidth: 1200,
+    baseHeight: 800,
+    logoAspectRatio: watermarkLogoAspectRatio,
+    mode: 'settings',
+  }), [watermarkLogoAspectRatio, watermarkPreviewConfig])
+
+  const watermarkPreviewBackground = useAlbumPhotoPreview && previewPhotoUrl ? previewPhotoUrl : null
+
+  if (!open) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
@@ -583,6 +628,7 @@ export default function ProjectEditDialog({
               onDelete={handleDeleteAsset}
               uploading={assetUploading === 'cover'}
               alwaysVisible
+              previewUrl={getAssetPreviewUrl('cover', projectAssets.cover)}
             />
 
             <AssetSection
@@ -596,6 +642,7 @@ export default function ProjectEditDialog({
               onUpload={handleAssetUpload}
               onDelete={handleDeleteAsset}
               uploading={assetUploading === 'banner'}
+              previewUrl={getAssetPreviewUrl('banner', projectAssets.banner)}
             />
 
             <AssetSection
@@ -609,6 +656,7 @@ export default function ProjectEditDialog({
               onUpload={handleAssetUpload}
               onDelete={handleDeleteAsset}
               uploading={assetUploading === 'splash_poster'}
+              previewUrl={getAssetPreviewUrl('splash_poster', projectAssets.splash_poster)}
             >
               <div className="space-y-1.5">
                 <label className="text-xs font-medium text-foreground">Display Duration (seconds)</label>
@@ -633,6 +681,7 @@ export default function ProjectEditDialog({
               onUpload={handleAssetUpload}
               onDelete={handleDeleteAsset}
               uploading={assetUploading === 'loading_gif'}
+              previewUrl={getAssetPreviewUrl('loading_gif', projectAssets.loading_gif)}
             />
 
             <AssetSection
@@ -646,6 +695,7 @@ export default function ProjectEditDialog({
               onUpload={handleAssetUpload}
               onDelete={handleDeleteAsset}
               uploading={assetUploading === 'watermark_logo'}
+              previewUrl={getAssetPreviewUrl('watermark_logo', projectAssets.watermark_logo)}
             >
               <div className="space-y-3">
                 <label className="flex items-center gap-2 text-sm text-foreground">
@@ -681,12 +731,40 @@ export default function ProjectEditDialog({
                   </div>
                 </div>
                 <div className="space-y-2">
-                  <p className="text-xs font-medium text-foreground">Watermark Preview</p>
-                  <div className="relative h-44 overflow-hidden rounded-md border border-border bg-gradient-to-br from-zinc-200 to-zinc-300">
-                    <div className="absolute inset-0 bg-[linear-gradient(135deg,rgba(255,255,255,0.15)_25%,transparent_25%,transparent_50%,rgba(255,255,255,0.15)_50%,rgba(255,255,255,0.15)_75%,transparent_75%,transparent)] bg-[length:24px_24px] opacity-50" />
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-medium text-foreground">Watermark Preview</p>
+                      <p className="text-[11px] text-muted-foreground">3:2 preview with the same relative watermark layout used by client preview.</p>
+                    </div>
+                    <label className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                      <input
+                        type="checkbox"
+                        checked={useAlbumPhotoPreview && Boolean(previewPhotoUrl)}
+                        disabled={!previewPhotoUrl}
+                        onChange={(e) => setUseAlbumPhotoPreview(e.target.checked)}
+                      />
+                      Use first album photo
+                    </label>
+                  </div>
+                  <div className="relative aspect-[3/2] overflow-hidden rounded-md border border-border bg-zinc-200">
+                    {watermarkPreviewBackground ? (
+                      <img
+                        src={watermarkPreviewBackground}
+                        alt="Album preview"
+                        className="absolute inset-0 h-full w-full object-cover"
+                      />
+                    ) : (
+                      <>
+                        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.9),rgba(255,255,255,0.2)_35%,transparent_55%),linear-gradient(135deg,#d6d3d1,#e7e5e4_38%,#cbd5e1_100%)]" />
+                        <div className="absolute inset-0 bg-[linear-gradient(135deg,rgba(255,255,255,0.15)_25%,transparent_25%,transparent_50%,rgba(255,255,255,0.15)_50%,rgba(255,255,255,0.15)_75%,transparent_75%,transparent)] bg-[length:24px_24px] opacity-40" />
+                        <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/30 via-black/5 to-transparent px-4 py-3 text-[11px] text-white/90">
+                          Default 3:2 preview canvas
+                        </div>
+                      </>
+                    )}
                     {projectAssets.watermark_logo?.url ? (
                       <img
-                        src={projectAssets.watermark_logo.url}
+                        src={getAssetPreviewUrl('watermark_logo', projectAssets.watermark_logo) || projectAssets.watermark_logo.url}
                         alt="Watermark preview"
                         className="absolute max-w-none object-contain"
                         style={watermarkPreviewStyle}
@@ -696,6 +774,10 @@ export default function ProjectEditDialog({
                         No watermark logo
                       </div>
                     )}
+                  </div>
+                  <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                    <span>{watermarkPreviewBackground ? 'Using first album photo' : 'Using built-in preview canvas'}</span>
+                    <span>Offset is treated as % of image width/height</span>
                   </div>
                 </div>
               </div>

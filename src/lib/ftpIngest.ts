@@ -19,6 +19,36 @@ export type FtpIngestSummary = {
   rawJobsResponse: unknown
 }
 
+type JsonObject = Record<string, unknown>
+type SupabaseResult<T> = { data: T | null }
+
+type SupabaseFilterBuilder<T> = PromiseLike<SupabaseResult<T>> & {
+  eq: (column: string, value: unknown) => SupabaseFilterBuilder<T>
+  gte: (column: string, value: string) => SupabaseFilterBuilder<T>
+  or: (filters: string) => SupabaseFilterBuilder<T>
+  maybeSingle: () => Promise<SupabaseResult<JsonObject>>
+}
+
+type SupabaseTableBuilder = {
+  select: (columns: string) => SupabaseFilterBuilder<JsonObject[]>
+  update: (values: JsonObject) => SupabaseFilterBuilder<JsonObject[]>
+  insert: (values: JsonObject[]) => Promise<unknown>
+}
+
+type SupabaseAdminLike = {
+  from: (table: string) => SupabaseTableBuilder
+}
+
+function asRecord(value: unknown): JsonObject | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as JsonObject)
+    : null
+}
+
+function toStringValue(value: unknown): string {
+  return typeof value === 'string' ? value : ''
+}
+
 async function postJson(url: string, body: unknown) {
   const res = await fetch(url, {
     method: 'POST',
@@ -26,8 +56,11 @@ async function postJson(url: string, body: unknown) {
     body: JSON.stringify(body),
   })
   const text = await res.text()
-  let json: any = null
-  try { json = text ? JSON.parse(text) : null } catch {}
+  let json: JsonObject | null = null
+  try {
+    const parsed: unknown = text ? JSON.parse(text) : null
+    json = asRecord(parsed)
+  } catch {}
   return { res, json, text }
 }
 
@@ -74,7 +107,7 @@ async function validateDownloadedImage(params: { tempPath: string; fileName: str
 async function cleanupPartialUpload(params: {
   uploadBaseUrl: string
   projectId: string
-  supabaseAdmin: { from: (table: string) => any }
+  supabaseAdmin: SupabaseAdminLike
   recentBeforeIso: string
   fileName: string
 }) {
@@ -85,7 +118,9 @@ async function cleanupPartialUpload(params: {
     .or(`file_name.eq.${params.fileName},original_file_name.eq.${params.fileName}`)
 
   const rows = Array.isArray(cleanupCandidates.data) ? cleanupCandidates.data : []
-  const photoIds = Array.from(new Set(rows.map((row: any) => String(row.photo_id ?? '')).filter(Boolean)))
+  const photoIds = Array.from(new Set(rows
+    .map((row) => toStringValue(asRecord(row)?.photo_id))
+    .filter(Boolean)))
 
   for (const photoId of photoIds) {
     try {
@@ -100,7 +135,7 @@ export async function runProjectFtpIngest(params: {
   projectId: string
   ftpIngest: FtpIngestConfig
   uploadBaseUrl: string
-  supabaseAdmin: { from: (table: string) => any }
+  supabaseAdmin: SupabaseAdminLike
 }) : Promise<FtpIngestSummary> {
   const config = params.ftpIngest
   if (!config.enabled) throw new Error('FTP ingest is not enabled')

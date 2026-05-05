@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Check, Download } from "lucide-react";
+import { Check, Download, Heart } from "lucide-react";
 import type { Photo } from "@/data/mockData";
 import { colorLabelMap } from "@/data/mockData";
 import { cn } from "@/lib/utils";
@@ -19,6 +19,7 @@ interface PhotoCardProps {
   hideDownloadButton?: boolean;
   clientDownloadMode?: boolean;
   forceSquare?: boolean;
+  onToggleAdminColorTag?: (photoId: string, color: Exclude<keyof typeof colorLabelMap, 'none'>) => void;
 }
 
 const PhotoCard = ({
@@ -33,8 +34,9 @@ const PhotoCard = ({
   hideDownloadButton = false,
   clientDownloadMode = false,
   forceSquare = false,
+  onToggleAdminColorTag,
 }: PhotoCardProps) => {
-  const colorInfo = photo.colorLabel !== "none" ? colorLabelMap[photo.colorLabel] : null;
+  const adminColorTags = photo.adminColorTags ?? []
   const isEdited = (photo.versionCount || 1) > 1;
   const [showDownloadMenu, setShowDownloadMenu] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -102,8 +104,10 @@ const PhotoCard = ({
 
         {selected && <div className="absolute inset-0 z-10 bg-black/25" />}
 
-        {colorInfo && (
-          <div className={`absolute bottom-2 left-2 z-20 h-3.5 w-3.5 rounded-full ${colorInfo.bg} ring-2 ring-white/80`} />
+        {photo.clientMarked && (
+          <div className="absolute right-2 top-2 z-20 rounded-full bg-black/45 p-1 text-white">
+            <Heart className="h-3.5 w-3.5 fill-current text-rose-400" />
+          </div>
         )}
 
         {onSelect !== undefined && (
@@ -159,8 +163,37 @@ const PhotoCard = ({
           </div>
         )}
 
-        {colorInfo && (
-          <div className={`absolute bottom-2 left-2 z-20 h-3 w-3 rounded-full ${colorInfo.bg} ring-2 ring-white/90`} />
+        {photo.clientMarked && (
+          <div className="absolute left-2 top-2 z-20 rounded-full bg-black/45 p-1 text-white">
+            <Heart className="h-3.5 w-3.5 fill-current text-rose-400" />
+          </div>
+        )}
+        {(adminColorTags.length > 0 || onToggleAdminColorTag) && (
+          <>
+            {adminColorTags.length > 0 && (
+              <div className="pointer-events-none absolute right-2 top-2 z-20 flex items-center justify-end gap-1 transition-opacity group-hover:opacity-0">
+                {adminColorTags.map((tag) => (
+                  <span key={tag} className={`h-2.5 w-2.5 rounded-full ${colorLabelMap[tag].bg}`} />
+                ))}
+              </div>
+            )}
+            {onToggleAdminColorTag && (
+              <div className="pointer-events-none absolute right-2 top-2 z-30 flex items-center justify-end gap-1 opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100">
+                {(["red", "green", "blue", "yellow", "purple"] as const).map((tag) => (
+                  <button
+                    key={tag}
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onToggleAdminColorTag(photo.id, tag);
+                    }}
+                    className={`h-3 w-3 rounded-full ${colorLabelMap[tag].bg} ring-2 ${adminColorTags.includes(tag) ? 'ring-white ring-offset-1 ring-offset-black/30' : 'ring-transparent'} transition-transform hover:scale-110`}
+                    aria-label={`Toggle ${tag} tag`}
+                  />
+                ))}
+              </div>
+            )}
+          </>
         )}
 
         {onSelect !== undefined && (

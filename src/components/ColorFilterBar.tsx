@@ -7,31 +7,36 @@ const allColors: ColorLabel[] = ["red", "green", "blue", "yellow", "purple"];
 interface ColorFilterBarProps {
   active: ColorLabel | "all";
   onChange: (c: ColorLabel | "all") => void;
+  selectedColors?: ColorLabel[];
+  onToggleColor?: (color: ColorLabel) => void;
 }
 
-const ColorFilterBar = ({ active, onChange }: ColorFilterBarProps) => {
+const ColorFilterBar = ({ active, onChange, selectedColors, onToggleColor }: ColorFilterBarProps) => {
+  const isMulti = Array.isArray(selectedColors) && typeof onToggleColor === 'function'
+
   return (
     <div className="flex items-center gap-2">
       <button
         type="button"
-        onClick={() => onChange("all")}
+        onClick={() => isMulti ? allColors.forEach((color) => selectedColors.includes(color) && onToggleColor(color)) : onChange("all")}
         className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
-          active === "all"
-            ? "bg-foreground text-background"
-            : "bg-muted text-muted-foreground hover:text-foreground"
+          isMulti
+            ? (selectedColors.length === 0 ? "bg-foreground text-background" : "bg-muted text-muted-foreground hover:text-foreground")
+            : (active === "all" ? "bg-foreground text-background" : "bg-muted text-muted-foreground hover:text-foreground")
         }`}
       >
-        All
+        全部
       </button>
       {allColors.map((c) => {
         const info = colorLabelMap[c];
+        const activeState = isMulti ? selectedColors.includes(c) : active === c
         return (
           <button
             key={c}
             type="button"
-            onClick={() => onChange(c)}
+            onClick={() => isMulti ? onToggleColor(c) : onChange(c)}
             className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition-colors ${
-              active === c
+              activeState
                 ? "bg-foreground text-background"
                 : "bg-muted text-muted-foreground hover:text-foreground"
             }`}

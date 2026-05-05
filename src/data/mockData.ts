@@ -24,11 +24,11 @@ export interface Project {
     last_sync_at?: string | null;
   };
   project_assets?: {
-    cover?: { url?: string; file_name?: string; mime_type?: string; file_size_bytes?: number };
-    banner?: { url?: string; file_name?: string; mime_type?: string; file_size_bytes?: number };
-    splash_poster?: { url?: string; file_name?: string; mime_type?: string; file_size_bytes?: number; duration_seconds?: number };
-    loading_gif?: { url?: string; file_name?: string; mime_type?: string; file_size_bytes?: number };
-    watermark_logo?: { url?: string; file_name?: string; mime_type?: string; file_size_bytes?: number };
+    cover?: { url?: string; file_name?: string; mime_type?: string; file_size_bytes?: number; version_token?: string };
+    banner?: { url?: string; file_name?: string; mime_type?: string; file_size_bytes?: number; version_token?: string };
+    splash_poster?: { url?: string; file_name?: string; mime_type?: string; file_size_bytes?: number; duration_seconds?: number; version_token?: string };
+    loading_gif?: { url?: string; file_name?: string; mime_type?: string; file_size_bytes?: number; version_token?: string };
+    watermark_logo?: { url?: string; file_name?: string; mime_type?: string; file_size_bytes?: number; version_token?: string };
   };
   visual_settings?: {
     watermark?: {
@@ -50,6 +50,12 @@ export interface Album {
   children?: Album[];
 }
 
+export interface PhotoClientMarkDetail {
+  viewerSessionId: string;
+  createdAt?: string;
+  label: string;
+}
+
 export interface Photo {
   id: string;
   url: string;
@@ -65,15 +71,24 @@ export interface Photo {
   folderId?: string;
   originalFileId?: string;
   retouchedFileId?: string;
+  clientPreviewFileId?: string;
   thumbUrl?: string;
   displayUrl?: string;
   downloadUrl?: string;
+  clientPreviewUrl?: string;
+  clientPreviewWatermarkSignature?: string;
+  projectWatermarkSignature?: string;
   retouchedOriginalUrl?: string;
   originalUrl?: string;
   versionCount?: number;
   latestVersionNo?: number;
   firstVersionNo?: number;
   isPublished?: boolean;
+  clientMarked?: boolean;
+  clientMarkCount?: number;
+  hasClientMarks?: boolean;
+  clientMarkDetails?: PhotoClientMarkDetail[];
+  adminColorTags?: ColorLabel[];
 }
 
 export interface UploadFile {
