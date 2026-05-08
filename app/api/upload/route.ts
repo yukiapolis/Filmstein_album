@@ -7,6 +7,8 @@ import { r2 } from '../../../src/lib/r2/client'
 import { DeleteObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3'
 import { extractPhotoIdFromFileName, extractVersionNoFromFileName, looksLikeRetouchFile, normalizeBaseName, type UploadAnalysisResult } from '@/lib/uploadAnalysis'
 import { BRANCH_TYPE_CLIENT_PREVIEW, buildWatermarkedClientPreview, getClientPreviewFileName, getClientPreviewKey } from '@/lib/clientPreviewAsset'
+import { getWatermarkVersionSignature } from '@/lib/clientWatermark'
+import type { Project } from '@/data/mockData'
 
 const BRANCH_TYPE_ORIGINAL = 'original';
 const BRANCH_TYPE_RAW = 'raw';
@@ -172,10 +174,15 @@ async function buildClientPreviewAsset(params: {
   }
 
   const projectAssets = asRecord(projectRow?.project_assets) ?? {};
-  const watermark = asRecord(asRecord(projectRow?.visual_settings)?.watermark) ?? {};
+  const visualSettings = asRecord(projectRow?.visual_settings) ?? {};
+  const watermark = asRecord(visualSettings.watermark) ?? {};
   const watermarkLogo = asRecord(projectAssets.watermark_logo);
   const logoUrl = typeof watermarkLogo?.url === 'string' ? watermarkLogo.url : undefined;
   const watermarkEnabled = Boolean(watermark.enabled && logoUrl);
+  const watermarkSignature = getWatermarkVersionSignature({
+    project_assets: (projectRow?.project_assets as Project['project_assets']) || undefined,
+    visual_settings: (projectRow?.visual_settings as Project['visual_settings']) || undefined,
+  } as Project);
 
   if (!watermarkEnabled || !logoUrl) {
     return { ok: false as const, skipped: true as const, reason: 'watermark disabled or logo missing' };
@@ -224,7 +231,11 @@ async function buildClientPreviewAsset(params: {
     height: metadata.height,
     checksum_sha256: sha256(outputBuffer),
     exif: metadata.exif,
-    processing_meta: { derived_from: 'display', preset: 'client-preview-watermarked-v1' },
+    processing_meta: {
+      derived_from: 'display',
+      preset: 'client-preview-watermarked-v1',
+      watermark_signature: watermarkSignature,
+    },
     created_by: null,
   };
 
@@ -746,11 +757,16 @@ export async function POST(req: Request) {
 
       if (clientPreviewAsset.ok) {
         createdFileIds.clientPreview = clientPreviewAsset.id;
-      } else if (clientPreviewAsset.skipped) {
-        warnings.push(`client preview asset skipped: ${clientPreviewAsset.reason}`);
       } else {
-        console.warn('[upload] client preview asset generation failed:', clientPreviewAsset.reason, { projectId: targetProjectId, photoId: targetPhotoId, versionNo: nextVersionNo });
-        return rollbackUploadArtifacts(`client preview asset generation failed: ${clientPreviewAsset.reason}`);
+        const warningMessage = `${clientPreviewAsset.skipped ? 'client preview asset skipped' : 'client preview asset generation failed'}: ${clientPreviewAsset.reason}`;
+        console.warn('[upload] client preview asset unavailable, continuing without stored client preview', {
+          reason: clientPreviewAsset.reason,
+          skipped: clientPreviewAsset.skipped,
+          projectId: targetProjectId,
+          photoId: targetPhotoId,
+          versionNo: nextVersionNo,
+        });
+        warnings.push(warningMessage);
       }
     }
 
