@@ -413,6 +413,7 @@ async function buildClientImage(request: NextRequest, context: RouteContext, hea
       })
     }
 
+    const sourceBuffer = source.buffer
     const versionNo = Number(latestVersion.versionNo ?? 1)
     const cacheKey = getCacheKey({
       photoId: id,
@@ -450,7 +451,7 @@ async function buildClientImage(request: NextRequest, context: RouteContext, hea
     }
 
     if (!watermarkEnabled) {
-      return new Response(headOnly ? null : new Uint8Array(source.buffer), {
+      return new Response(headOnly ? null : new Uint8Array(sourceBuffer), {
         headers: {
           'Content-Type': 'image/jpeg',
           'Content-Disposition': `${disposition}; filename*=UTF-8''${encodeURIComponent(`${id}-${mode}.jpg`)}`,
@@ -479,51 +480,63 @@ async function buildClientImage(request: NextRequest, context: RouteContext, hea
       ? `${request.nextUrl.origin}/api/projects/${photoRow.project_id}/assets/watermark_logo`
       : logoUrl!
 
+    const buildBypassResponse = (fallbackReason: string, watermarkFetchMs = 0, compositeMs = 0) => new Response(headOnly ? null : new Uint8Array(sourceBuffer), {
+      headers: {
+        'Content-Type': 'image/jpeg',
+        'Content-Disposition': `${disposition}; filename*=UTF-8''${encodeURIComponent(`${id}-${mode}.jpg`)}`,
+        'Cache-Control': 'public, max-age=300',
+        'X-Watermark-Cache': 'BYPASS',
+        'X-Image-Source': source.sourceType,
+        'X-Debug-Source-Meta': debugSourceMeta,
+        'X-Watermark-Fallback': fallbackReason,
+        'X-Watermark-Logo-Url': logoFetchUrl,
+        ...buildDebugHeaders(debugEnabled, {
+          'X-Debug-Preview-Path': 'client-render',
+          'X-Debug-Preview-Source-Url': source.sourceKey,
+          'X-Debug-Render-Mode': mode,
+          'X-Debug-Image-Source': source.sourceType,
+          'X-Debug-Watermark-Version': watermarkVersionSignature,
+          'X-Debug-Source-Select-Ms': source.timing?.sourceSelectMs,
+          'X-Debug-Source-Read-Ms': source.timing?.sourceReadMs,
+          'X-Debug-Watermark-Url': logoFetchUrl,
+          'X-Debug-Watermark-Fetch-Ms': watermarkFetchMs,
+          'X-Debug-Composite-Ms': compositeMs,
+          'X-Debug-Total-Ms': msSince(requestStartedAt),
+        }),
+        ...(source.fallbackMessage ? { 'X-Image-Fallback': source.fallbackMessage } : {}),
+      },
+    })
+
+    let logoResult: Awaited<ReturnType<typeof getNormalizedWatermarkLogoBuffer>>
     const watermarkFetchStartedAt = Date.now()
     const logoCacheKey = `${photoRow.project_id}:${watermarkVersionSignature}`
-    const logoResult = await getNormalizedWatermarkLogoBuffer({
-      cacheKey: logoCacheKey,
-      logoUrl: logoFetchUrl,
-    })
+    try {
+      logoResult = await getNormalizedWatermarkLogoBuffer({
+        cacheKey: logoCacheKey,
+        logoUrl: logoFetchUrl,
+      })
+    } catch {
+      return buildBypassResponse('logo-fetch-threw', msSince(watermarkFetchStartedAt), 0)
+    }
     const watermarkFetchMs = msSince(watermarkFetchStartedAt)
     if (!logoResult.buffer) {
-      return new Response(headOnly ? null : new Uint8Array(source.buffer), {
-        headers: {
-          'Content-Type': 'image/jpeg',
-          'Content-Disposition': `${disposition}; filename*=UTF-8''${encodeURIComponent(`${id}-${mode}.jpg`)}`,
-          'Cache-Control': 'public, max-age=300',
-          'X-Watermark-Cache': 'BYPASS',
-          'X-Image-Source': source.sourceType,
-          'X-Debug-Source-Meta': debugSourceMeta,
-          'X-Watermark-Fallback': 'logo-fetch-failed',
-          'X-Watermark-Logo-Url': logoFetchUrl,
-          ...buildDebugHeaders(debugEnabled, {
-            'X-Debug-Preview-Path': 'client-render',
-            'X-Debug-Preview-Source-Url': source.sourceKey,
-            'X-Debug-Render-Mode': mode,
-            'X-Debug-Image-Source': source.sourceType,
-            'X-Debug-Watermark-Version': watermarkVersionSignature,
-            'X-Debug-Source-Select-Ms': source.timing?.sourceSelectMs,
-            'X-Debug-Source-Read-Ms': source.timing?.sourceReadMs,
-            'X-Debug-Watermark-Url': logoFetchUrl,
-            'X-Debug-Watermark-Fetch-Ms': watermarkFetchMs,
-            'X-Debug-Composite-Ms': 0,
-            'X-Debug-Total-Ms': msSince(requestStartedAt),
-          }),
-          ...(source.fallbackMessage ? { 'X-Image-Fallback': source.fallbackMessage } : {}),
-        },
-      })
+      return buildBypassResponse('logo-fetch-failed', watermarkFetchMs, 0)
     }
     const logoBuffer = logoResult.buffer
 
+    let outputBuffer: Buffer
     const compositeStartedAt = Date.now()
-    const outputBuffer = await buildWatermarkedClientPreview({
-      sourceBuffer: source.buffer,
-      logoBuffer,
-      logoAspectRatio: logoResult.aspectRatio,
-      watermark,
-      mode,
-    })
+    try {
+      outputBuffer = await buildWatermarkedClientPreview({
+        sourceBuffer,
+        logoBuffer,
+        logoAspectRatio: logoResult.aspectRatio,
+        watermark,
+        mode,
+      })
+    } catch {
+      return buildBypassResponse('watermark-composite-failed', watermarkFetchMs, msSince(compositeStartedAt))
+    }
 
     const compositeMs = msSince(compositeStartedAt)
 
