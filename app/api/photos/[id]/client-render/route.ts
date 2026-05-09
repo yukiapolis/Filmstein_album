@@ -78,6 +78,32 @@ function getCacheKey(input: {
   return JSON.stringify(input)
 }
 
+function resolvePublicRequestOrigin(request: NextRequest) {
+  const forwardedProto = request.headers.get('x-forwarded-proto')?.split(',')[0]?.trim()
+  const forwardedHost = request.headers.get('x-forwarded-host')?.split(',')[0]?.trim()
+  const host = request.headers.get('host')?.trim()
+  const protocol = forwardedProto || request.nextUrl.protocol.replace(/:$/, '') || 'https'
+
+  if (forwardedHost) return `${protocol}://${forwardedHost}`
+  if (host) return `${protocol}://${host}`
+  return request.nextUrl.origin
+}
+
+function resolveWatermarkLogoFetchUrl(request: NextRequest, projectId: string, logoUrl: string) {
+  if (/^https?:\/\//i.test(logoUrl)) {
+    try {
+      const parsed = new URL(logoUrl)
+      if (!['localhost', '127.0.0.1', '::1'].includes(parsed.hostname)) {
+        return parsed.toString()
+      }
+    } catch {
+      // fall through to same-origin asset API
+    }
+  }
+
+  return `${resolvePublicRequestOrigin(request)}/api/projects/${projectId}/assets/watermark_logo`
+}
+
 function asRecord(value: unknown): JsonObject | null {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as JsonObject)
@@ -476,9 +502,7 @@ async function buildClientImage(request: NextRequest, context: RouteContext, hea
       })
     }
 
-    const logoFetchUrl = logoUrl?.startsWith('http')
-      ? `${request.nextUrl.origin}/api/projects/${photoRow.project_id}/assets/watermark_logo`
-      : logoUrl!
+    const logoFetchUrl = resolveWatermarkLogoFetchUrl(request, photoRow.project_id, logoUrl!)
 
     const buildBypassResponse = (fallbackReason: string, watermarkFetchMs = 0, compositeMs = 0) => new Response(headOnly ? null : new Uint8Array(sourceBuffer), {
       headers: {
