@@ -576,7 +576,7 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
 
   const handleDeleteManagedFolders = async () => {
     if (selectedManagedFolders.length === 0) return;
-    const ok = window.confirm(`删除 ${selectedManagedFolders.length} 个子相册？相册内图片将回到 All Photos。`);
+    const ok = window.confirm(`Delete ${selectedManagedFolders.length} sub-albums? Photos inside them will be moved back to All Photos.`);
     if (!ok) return;
 
     const res = await fetch(`/api/projects/${projectId}/folders`, {
@@ -753,14 +753,14 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
                   />
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-xs font-medium text-muted-foreground">颜色标签</span>
+                  <span className="text-xs font-medium text-muted-foreground">Color Label</span>
                   <ColorFilterBar active="all" onChange={() => undefined} selectedColors={colorFilter} onToggleColor={toggleColorFilter} />
                   <button
                     type="button"
                     onClick={() => setClientMarkedFilter((prev) => !prev)}
                     className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${clientMarkedFilter ? 'bg-foreground text-background' : 'bg-muted text-muted-foreground hover:text-foreground'}`}
                   >
-                    被客户标记过
+                    Client Tagged
                   </button>
                   <select
                     value={publishFilter}
@@ -1075,13 +1075,13 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
       {deleteConfirmOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
           <div className="w-full max-w-md rounded-xl border border-border bg-card p-5 shadow-xl">
-            <h3 className="text-base font-semibold text-foreground">确认删除</h3>
+            <h3 className="text-base font-semibold text-foreground">Confirm Delete</h3>
             <p className="mt-2 text-sm text-muted-foreground">
-              你可以删除所选图片的当前最新版，或删除整张图片及其全部版本。此操作不可恢复。
+              You can delete the current version of the selected photos, or delete the photos and all their versions. This action cannot be undone.
             </p>
             <div className="mt-4 flex justify-end gap-2">
               <Button type="button" variant="outline" onClick={() => setDeleteConfirmOpen(false)} disabled={deleting}>
-                取消
+                Cancel
               </Button>
               <Button
                 type="button"
@@ -1092,7 +1092,7 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
                 }}
                 disabled={deleting}
               >
-                {deleting ? '删除中…' : '删除当前最新版'}
+                {deleting ? 'Deleting…' : 'Delete Current Version'}
               </Button>
               <Button
                 type="button"
@@ -1103,7 +1103,7 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
                 }}
                 disabled={deleting}
               >
-                {deleting ? '删除中…' : '删除整张图片'}
+                {deleting ? 'Deleting…' : 'Delete Photos'}
               </Button>
             </div>
           </div>

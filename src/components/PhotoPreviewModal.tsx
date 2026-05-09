@@ -200,7 +200,7 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurren
       <div className="absolute left-4 top-4 z-10 flex items-center gap-2">
         {photo.isPublished === false && (
           <span className="inline-flex items-center rounded-md bg-black/70 px-2 py-0.5 text-[10px] font-semibold text-white shadow-sm">
-            未发布
+            Unpublished
           </span>
         )}
       </div>
@@ -233,7 +233,7 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurren
               void onTogglePublish(photo, !photo.isPublished);
             }}
           >
-            {photo.isPublished ? '取消发布' : '发布'}
+            {photo.isPublished ? 'Unpublish' : 'Publish'}
           </Button>
         )}
         {onDeleteCurrent && (
@@ -260,7 +260,7 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurren
                       void openDownload("client-display");
                     }}
                   >
-                    下载带水印图片
+                    Download Preview
                   </button>
                   <button
                     type="button"
@@ -270,7 +270,7 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurren
                       void openDownload("client-original");
                     }}
                   >
-                    下载带水印大图
+                    Download Original
                   </button>
                 </>
               ) : (
@@ -283,7 +283,7 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurren
                       void openDownload("current");
                     }}
                   >
-                    下载当前版本
+                    Download Current Version
                   </button>
                   {(photo.versionCount || 1) > 1 && (
                     <button
@@ -294,7 +294,7 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurren
                         void openDownload("retouched-original");
                       }}
                     >
-                      下载修图原图
+                      Download Retouched Original
                     </button>
                   )}
                   <button
@@ -305,7 +305,7 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurren
                       void openDownload("original");
                     }}
                   >
-                    下载最初原图
+                    Download Initial Original
                   </button>
                 </>
               )}
@@ -410,7 +410,7 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurren
               setHighResFailed(false)
             }}
           >
-            {highResRequested && imageLoading ? '高清加载中…' : '查看高清大图'}
+            {highResRequested && imageLoading ? 'Loading original…' : 'View Original'}
           </button>
         )}
         <span>{index + 1} / {photos.length}</span>
@@ -418,7 +418,7 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurren
 
       {highResFailed && (
         <div className="absolute bottom-[calc(max(1.5rem,env(safe-area-inset-bottom))+2.5rem)] left-1/2 z-20 -translate-x-1/2 rounded-full border border-white/10 bg-black/60 px-3 py-1 text-xs text-white/85 backdrop-blur">
-          高清原图不可用，当前已是最高可用画质
+          Original image unavailable. Current image is the highest available quality.
         </div>
       )}
 
@@ -429,7 +429,7 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurren
           {!clientDownloadMode && (
             <div className="mt-3 space-y-2">
               <div className="flex items-center justify-between gap-3">
-                <p className="text-xs font-medium uppercase tracking-wide text-white/75">客户标记详情</p>
+                <p className="text-xs font-medium uppercase tracking-wide text-white/75">Client Marks</p>
                 <span className="text-xs text-white/60">{photo.clientMarkCount ?? photo.clientMarkDetails?.length ?? 0} marks</span>
               </div>
               {(photo.clientMarkDetails?.length ?? 0) > 0 ? (
@@ -451,7 +451,7 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurren
                   ))}
                 </div>
               ) : (
-                <p className="text-xs text-white/60">暂无客户标记</p>
+                <p className="text-xs text-white/60">No client marks yet</p>
               )}
             </div>
           )}
@@ -461,23 +461,23 @@ const PhotoPreviewModal = ({ photos, initialIndex, open, onClose, onDeleteCurren
       {showDeleteConfirm && (
         <div className="absolute inset-0 z-[60] flex items-center justify-center bg-black/60" onClick={(e) => e.stopPropagation()}>
           <div className="w-full max-w-md rounded-xl border border-border bg-card p-5 text-foreground shadow-2xl">
-            <h3 className="text-base font-semibold">确认删除</h3>
+            <h3 className="text-base font-semibold">Confirm Delete</h3>
             <p className="mt-2 text-sm text-muted-foreground">
               {onDeleteCurrent && onDeleteAllVersions
-                ? '你可以删除该图片当前最新版，或删除整张图片及全部版本。'
-                : '这会删除当前图片的全部版本，并删除对应逻辑照片。此操作不可恢复。'}
+                ? 'You can delete the current version of this photo, or delete the photo and all its versions.'
+                : 'This will delete all versions of this photo and remove the linked logical photo. This action cannot be undone.'}
             </p>
             <div className="mt-4 flex justify-end gap-2">
               <Button type="button" variant="outline" onClick={() => setShowDeleteConfirm(false)} disabled={deleting}>
-                取消
+                Cancel
               </Button>
               {onDeleteCurrent && onDeleteAllVersions && (
                 <Button type="button" variant="outline" onClick={() => void handleDelete('current')} disabled={deleting}>
-                  {deleting ? '删除中…' : '删除当前最新版'}
+                  {deleting ? 'Deleting…' : 'Delete Current Version'}
                 </Button>
               )}
               <Button type="button" variant="destructive" onClick={() => void handleDelete('all')} disabled={deleting}>
-                {deleting ? '删除中…' : '删除整张图片'}
+                {deleting ? 'Deleting…' : 'Delete Photo'}
               </Button>
             </div>
           </div>

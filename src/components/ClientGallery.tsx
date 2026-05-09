@@ -349,7 +349,7 @@ const ClientGallery = ({
                 onClick={() => setSplashVisible(false)}
                 className="rounded-full bg-white/90 px-3 py-1 text-sm font-medium text-foreground"
               >
-                跳过
+                Skip
               </button>
             </div>
             <div className="absolute inset-x-0 bottom-10 px-6 text-center text-white">
@@ -498,7 +498,7 @@ const ClientGallery = ({
           <div className="flex shrink-0 items-center gap-2">
             <Button type="button" variant="ghost" size="icon" className="h-9 w-9" title="Refresh" onClick={handleRefresh}><RefreshCw className="h-4 w-4" /></Button>
             <Button size="sm" variant="outline" onClick={downloadSelected} disabled={downloading || selections.size === 0}>
-              {downloading ? <><Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />Downloading…</> : <><Download className="mr-1.5 h-3.5 w-3.5" />下载图片</>}
+              {downloading ? <><Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />Downloading…</> : <><Download className="mr-1.5 h-3.5 w-3.5" />Download</>}
             </Button>
             <Button size="sm" variant="outline" onClick={async () => {
               if (filtered.length === 0) return;
@@ -530,7 +530,7 @@ const ClientGallery = ({
                 setDownloadingAll(false);
               }
             }} disabled={downloadingAll}>
-              {downloadingAll ? <><Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />…</> : <><Download className="mr-1.5 h-3.5 w-3.5" />下载全部图片</>}
+              {downloadingAll ? <><Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />…</> : <><Download className="mr-1.5 h-3.5 w-3.5" />Download All</>}
             </Button>
           </div>
         </div>

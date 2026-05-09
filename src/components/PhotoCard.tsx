@@ -158,7 +158,7 @@ const PhotoCard = ({
         {photo.isPublished === false && (
           <div className="absolute inset-0 z-20 flex items-center justify-center pointer-events-none">
             <span className="rounded-md bg-black/30 px-3 py-1 text-base font-semibold text-white/95 drop-shadow sm:text-lg">
-              未发布
+              Unpublished
             </span>
           </div>
         )}
@@ -257,13 +257,13 @@ const PhotoCard = ({
                       e.stopPropagation();
                       void openDownload("client-display");
                     }}>
-                      下载带水印图片
+                      Download Preview
                     </button>
                     <button type="button" className="block w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted" onClick={(e) => {
                       e.stopPropagation();
                       void openDownload("client-original");
                     }}>
-                      下载带水印大图
+                      Download Original
                     </button>
                   </>
                 ) : (
@@ -272,21 +272,21 @@ const PhotoCard = ({
                       e.stopPropagation();
                       void openDownload("current");
                     }}>
-                      下载当前版本
+                      Download Current Version
                     </button>
                     {(photo.versionCount || 1) > 1 && (
                       <button type="button" className="block w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted" onClick={(e) => {
                         e.stopPropagation();
                         void openDownload("retouched-original");
                       }}>
-                        下载修图原图
+                        Download Retouched Original
                       </button>
                     )}
                     <button type="button" className="block w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted" onClick={(e) => {
                       e.stopPropagation();
                       void openDownload("original");
                     }}>
-                      下载最初原图
+                      Download Initial Original
                     </button>
                   </>
                 )}
