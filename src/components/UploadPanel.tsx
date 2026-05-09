@@ -531,29 +531,29 @@ const UploadPanelContent = ({
           {mixedBatchActionOpen && (
             <div className="rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
               <p className="font-medium">Mixed batch detected</p>
-              <p className="mt-1">本批包含普通图片 {pendingNormalCount} 张，修图版本 {pendingRetouchCount} 张。这两类图片处理规则不同。</p>
+              <p className="mt-1">This batch contains {pendingNormalCount} standard photos and {pendingRetouchCount} retouched versions. These two types follow different processing rules.</p>
               {pendingDuplicateCount > 0 && (
-                <p className="mt-1 text-xs">另外有重复图片 {pendingDuplicateCount} 张，当前不会进入上传。</p>
+                <p className="mt-1 text-xs">There are also {pendingDuplicateCount} duplicate photos in this batch. They will not be uploaded.</p>
               )}
               <ul className="mt-2 list-disc pl-5 text-xs">
-                <li>普通图片会生成压缩 display</li>
-                <li>修图版本会直接使用原文件作为 display</li>
+                <li>Standard photos generate a compressed display image</li>
+                <li>Retouched versions use the original file directly as the display image</li>
               </ul>
               <div className="mt-3 flex flex-wrap gap-2">
                 <Button size="sm" variant="outline" type="button" onClick={async () => {
                   setMixedBatchActionOpen(false);
                   await handleUploadSubset(actionablePendingFiles.filter((f) => f.classification === 'new_original' || f.classification === 'unknown'));
                 }}>
-                  仅上传普通图片
+                  Upload Standard Photos Only
                 </Button>
                 <Button size="sm" variant="outline" type="button" onClick={async () => {
                   setMixedBatchActionOpen(false);
                   await handleUploadSubset(actionablePendingFiles.filter((f) => f.classification === 'retouch_upload'));
                 }}>
-                  仅上传修图版本
+                  Upload Retouched Versions Only
                 </Button>
                 <Button size="sm" variant="ghost" type="button" onClick={() => setMixedBatchActionOpen(false)}>
-                  取消
+                  Cancel
                 </Button>
               </div>
             </div>

@@ -25,7 +25,7 @@ const ColorFilterBar = ({ active, onChange, selectedColors, onToggleColor }: Col
             : (active === "all" ? "bg-foreground text-background" : "bg-muted text-muted-foreground hover:text-foreground")
         }`}
       >
-        全部
+        All
       </button>
       {allColors.map((c) => {
         const info = colorLabelMap[c];
