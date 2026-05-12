@@ -100,9 +100,11 @@ export default function ProjectListRow({ project }: { project: Project }) {
             <Button type="button" variant="outline" size="sm" asChild>
               <Link href={`/projects/${project.id}`}>Manage</Link>
             </Button>
-            <Button type="button" variant="destructive" size="sm" onClick={() => setConfirmOpen(true)}>
-              Delete
-            </Button>
+            {project.permissions?.canDelete !== false ? (
+              <Button type="button" variant="destructive" size="sm" onClick={() => setConfirmOpen(true)}>
+                Delete
+              </Button>
+            ) : null}
           </div>
         </div>
       </div>

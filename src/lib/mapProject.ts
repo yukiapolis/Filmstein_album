@@ -64,6 +64,8 @@ export function mapRowToProject(row: Record<string, unknown>): Project {
     name,
     type: asProjectType(row.type),
     date,
+    createdByAdminUserId:
+      typeof row.created_by_admin_user_id === "string" ? row.created_by_admin_user_id : undefined,
     created_at: typeof row.created_at === "string" ? row.created_at : undefined,
     cover_url: coverUrl,
     photoCount,
@@ -71,6 +73,7 @@ export function mapRowToProject(row: Record<string, unknown>): Project {
     status: asProjectStatus(row.status),
     clientName,
     description,
+    permissions: typeof row.permissions === 'object' && row.permissions !== null ? row.permissions as { canDelete?: boolean; canManageAssignments?: boolean } : undefined,
     ftp_ingest: typeof row.ftp_ingest === 'object' && row.ftp_ingest !== null ? row.ftp_ingest : undefined,
     project_assets: typeof row.project_assets === 'object' && row.project_assets !== null ? row.project_assets : undefined,
     visual_settings: typeof row.visual_settings === 'object' && row.visual_settings !== null ? row.visual_settings : undefined,

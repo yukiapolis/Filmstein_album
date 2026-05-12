@@ -3,6 +3,7 @@ import path from 'node:path'
 import crypto from 'node:crypto'
 import sharp from 'sharp'
 import { supabase } from '../../../src/lib/supabase/server'
+import { requireAdminApiAuth } from '@/lib/auth/session'
 import { r2 } from '../../../src/lib/r2/client'
 import { DeleteObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3'
 import { extractPhotoIdFromFileName, extractVersionNoFromFileName, looksLikeRetouchFile, normalizeBaseName, type UploadAnalysisResult } from '@/lib/uploadAnalysis'
@@ -50,6 +51,21 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : null;
+}
+
+async function getProjectPhotoIds(projectId: string) {
+  const { data, error } = await supabase
+    .from('photos')
+    .select('global_photo_id')
+    .eq('project_id', projectId)
+
+  if (error) {
+    throw error
+  }
+
+  return (data ?? [])
+    .map((row) => String(row.global_photo_id ?? ''))
+    .filter(Boolean)
 }
 
 async function getImageMetadata(buffer: Buffer) {
@@ -277,6 +293,9 @@ async function deleteStoredAsset(file: { storage_provider?: string | null; bucke
 }
 
 export async function POST(req: Request) {
+  const auth = await requireAdminApiAuth()
+  if (auth instanceof Response) return auth
+
   try {
     const url = new URL(req.url);
     if (url.searchParams.get('analyze') === 'true') {
@@ -299,6 +318,7 @@ export async function POST(req: Request) {
       let nextVersionNo: number | null = null;
       let classification: UploadAnalysisResult['classification'] = 'unknown';
       let reason = 'no matching rule';
+      let targetProjectId = projectId?.trim() || null;
 
       if (embeddedPhotoId) {
         const { data: matchedPhoto, error: matchedPhotoError } = await supabase
@@ -313,6 +333,7 @@ export async function POST(req: Request) {
 
         if (matchedPhoto) {
           matchedPhotoId = String(matchedPhoto.global_photo_id);
+          targetProjectId = String(matchedPhoto.project_id ?? targetProjectId ?? '');
         }
       }
 
@@ -331,11 +352,15 @@ export async function POST(req: Request) {
           reason = 'system photoId prefix found but target photo not found';
         }
       } else {
-        const { data: duplicateFileRows } = await supabase
-          .from('photo_files')
-          .select('photo_id, version_no, checksum_sha256')
-          .eq('checksum_sha256', checksum)
-          .limit(5);
+        const scopedPhotoIds = targetProjectId ? await getProjectPhotoIds(targetProjectId) : [];
+        const duplicateFileRows = scopedPhotoIds.length > 0
+          ? (await supabase
+              .from('photo_files')
+              .select('photo_id, version_no, checksum_sha256')
+              .eq('checksum_sha256', checksum)
+              .in('photo_id', scopedPhotoIds)
+              .limit(5)).data
+          : [];
 
         if (duplicateFileRows && duplicateFileRows.length > 0) {
           matchedPhotoId = String(duplicateFileRows[0].photo_id);
@@ -344,12 +369,15 @@ export async function POST(req: Request) {
           reason = 'exact checksum duplicate';
         } else {
           const candidateOriginalNames = Array.from(new Set([file.name, `${normalizedBaseName}${file.name.match(/\.[^.]+$/)?.[0] ?? ''}`]));
-          const { data: duplicateNameRows } = await supabase
-            .from('photo_files')
-            .select('photo_id, version_no, original_file_name')
-            .in('original_file_name', candidateOriginalNames)
-            .eq('branch_type', 'original')
-            .limit(5);
+          const duplicateNameRows = scopedPhotoIds.length > 0
+            ? (await supabase
+                .from('photo_files')
+                .select('photo_id, version_no, original_file_name')
+                .in('original_file_name', candidateOriginalNames)
+                .eq('branch_type', 'original')
+                .in('photo_id', scopedPhotoIds)
+                .limit(5)).data
+            : [];
 
           if (duplicateNameRows && duplicateNameRows.length > 0) {
             matchedPhotoId = String(duplicateNameRows[0].photo_id)
@@ -485,20 +513,30 @@ export async function POST(req: Request) {
     const hasSystemPhotoIdPrefix = Boolean(file.name.match(GLOBAL_PHOTO_ID_RE)?.[0]?.toUpperCase());
     const originalBranchType = uploadKind === 'raw' ? BRANCH_TYPE_RAW : BRANCH_TYPE_ORIGINAL;
 
-    const { data: duplicateFileRows, error: duplicateCheckError } = await supabase
-      .from('photo_files')
-      .select('id, photo_id, version_no, checksum_sha256')
-      .eq('checksum_sha256', checksum)
-      .limit(5);
+    const scopedPhotoIds = await getProjectPhotoIds(targetProjectId)
+    const duplicateCheckResult = scopedPhotoIds.length > 0
+      ? await supabase
+          .from('photo_files')
+          .select('id, photo_id, version_no, checksum_sha256')
+          .eq('checksum_sha256', checksum)
+          .in('photo_id', scopedPhotoIds)
+          .limit(5)
+      : { data: [], error: null }
+    const duplicateFileRows = duplicateCheckResult.data ?? []
+    const duplicateCheckError = duplicateCheckResult.error
 
     if (duplicateCheckError) {
       return new Response(JSON.stringify({ success: false, error: duplicateCheckError.message }), { status: 500 });
     }
 
-    if (!hasSystemPhotoIdPrefix && duplicateFileRows && duplicateFileRows.length > 0) {
+    if (!hasSystemPhotoIdPrefix && duplicateFileRows.length > 0) {
       if (overwriteOriginal) {
         targetPhotoId = photoId?.trim() || String(duplicateFileRows[0].photo_id)
       } else {
+        if (createdNewPhoto && targetPhotoId) {
+          await supabase.from('photos').delete().eq('global_photo_id', targetPhotoId)
+          createdNewPhoto = false
+        }
         return new Response(JSON.stringify({
           success: false,
           error: 'Exact duplicate detected',

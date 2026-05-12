@@ -1,7 +1,10 @@
 import Link from "next/link";
+import { requireAdminPageAuth } from "@/lib/auth/session";
 
 /** Placeholder until the editor workspace is migrated. */
-export default function EditorPage() {
+export default async function EditorPage() {
+  await requireAdminPageAuth("/editor");
+
   return (
     <div className="container py-8 space-y-4">
       <Link href="/" className="text-sm text-muted-foreground hover:text-foreground">

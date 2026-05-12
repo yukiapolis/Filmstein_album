@@ -1,9 +1,13 @@
 import { supabase } from '@/lib/supabase/server'
 import { runProjectFtpIngest } from '@/lib/ftpIngest'
+import { requireAdminApiAuth } from '@/lib/auth/session'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
 export async function POST(req: Request, context: RouteContext) {
+  const auth = await requireAdminApiAuth()
+  if (auth instanceof Response) return auth
+
   try {
     const { id } = await context.params
     const origin = new URL(req.url).origin

@@ -1,49 +1,33 @@
-import { supabase } from '@/lib/supabase/server'
-import { scanProjectStorageOrphans } from '@/lib/projectStorageOrphans'
+import { loadProjectStorageScanScope, scanProjectStorageOrphans } from '@/lib/projectStorageOrphans'
+import { requireAdminApiAuth } from '@/lib/auth/session'
+import { getProjectPermissionContext } from '@/lib/auth/projectPermissions'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
 export async function POST(_req: Request, context: RouteContext) {
+  const auth = await requireAdminApiAuth()
+  if (auth instanceof Response) return auth
+
   try {
     const { id } = await context.params
-
-    const { data: project, error: projectError } = await supabase
-      .from('projects')
-      .select('id, cover_url')
-      .eq('id', id)
-      .maybeSingle()
-
-    if (projectError) {
-      return Response.json({ success: false, error: projectError.message }, { status: 500 })
-    }
-    if (!project) {
+    const permission = await getProjectPermissionContext(auth, id)
+    if (!permission.exists) {
       return Response.json({ success: false, error: 'Project not found' }, { status: 404 })
     }
-
-    const { data: photoRows, error: photoError } = await supabase
-      .from('photos')
-      .select('global_photo_id, original_file_id, retouched_file_id')
-      .eq('project_id', id)
-
-    if (photoError) {
-      return Response.json({ success: false, error: photoError.message }, { status: 500 })
+    if (!permission.canManageProject) {
+      return Response.json({ success: false, error: 'Forbidden' }, { status: 403 })
     }
 
-    const photoIds = (photoRows ?? []).map((row) => row.global_photo_id)
-    const { data: photoFiles, error: fileError } = await supabase
-      .from('photo_files')
-      .select('photo_id, object_key, storage_provider, bucket_name, file_size_bytes, created_at, branch_type')
-      .in('photo_id', photoIds.length > 0 ? photoIds : ['__none__'])
-
-    if (fileError) {
-      return Response.json({ success: false, error: fileError.message }, { status: 500 })
+    const scope = await loadProjectStorageScanScope(id)
+    if (!scope) {
+      return Response.json({ success: false, error: 'Project not found' }, { status: 404 })
     }
 
     const result = await scanProjectStorageOrphans({
       projectId: id,
-      project,
-      photoFiles: photoFiles ?? [],
-      photos: photoRows ?? [],
+      project: scope.project,
+      photoFiles: scope.photoFiles,
+      photos: scope.photos,
     })
 
     return Response.json({ success: true, data: result })

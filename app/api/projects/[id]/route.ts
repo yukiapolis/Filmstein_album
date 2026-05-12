@@ -1,5 +1,7 @@
 import { supabase } from '@/lib/supabase/server'
 import { mapRowToProject } from '@/lib/mapProject'
+import { requireAdminApiAuth } from '@/lib/auth/session'
+import { getProjectPermissionContext } from '@/lib/auth/projectPermissions'
 import { mapRowToPhoto } from '@/lib/mapPhoto'
 import { getFirstVersionFiles, getFirstVersionNo, getLatestVersionFiles, getLatestVersionNo, groupPhotoFilesByVersion, type PhotoFileRow } from '@/lib/photoVersions'
 import { DeleteObjectCommand } from '@aws-sdk/client-s3'
@@ -17,6 +19,18 @@ export async function GET(req: Request, context: RouteContext) {
     const { id } = await context.params
     const url = new URL(req.url)
     const publishedOnly = url.searchParams.get('publishedOnly') === 'true'
+
+    if (!publishedOnly) {
+      const auth = await requireAdminApiAuth()
+      if (auth instanceof Response) return auth
+      const permission = await getProjectPermissionContext(auth, id)
+      if (!permission.exists) {
+        return Response.json({ success: false, error: 'Not found' }, { status: 404 })
+      }
+      if (!permission.canAccessProject) {
+        return Response.json({ success: false, error: 'Forbidden' }, { status: 403 })
+      }
+    }
     const viewerSessionId = url.searchParams.get('viewerSessionId')?.trim() || null
 
     const { data: projectRow, error: projectError } = await supabase
@@ -176,8 +190,18 @@ export async function GET(req: Request, context: RouteContext) {
 }
 
 export async function PATCH(req: Request, context: RouteContext) {
+  const auth = await requireAdminApiAuth()
+  if (auth instanceof Response) return auth
+
   try {
     const { id } = await context.params
+    const permission = await getProjectPermissionContext(auth, id)
+    if (!permission.exists) {
+      return Response.json({ success: false, error: 'Not found' }, { status: 404 })
+    }
+    if (!permission.canManageProject) {
+      return Response.json({ success: false, error: 'Forbidden' }, { status: 403 })
+    }
     const body = await req.json()
 
     const updates: Record<string, unknown> = {}
@@ -217,8 +241,18 @@ export async function PATCH(req: Request, context: RouteContext) {
 }
 
 export async function DELETE(_req: Request, context: RouteContext) {
+  const auth = await requireAdminApiAuth()
+  if (auth instanceof Response) return auth
+
   try {
     const { id } = await context.params
+    const permission = await getProjectPermissionContext(auth, id)
+    if (!permission.exists) {
+      return Response.json({ success: false, error: 'Not found' }, { status: 404 })
+    }
+    if (!permission.canDeleteProject) {
+      return Response.json({ success: false, error: 'Forbidden' }, { status: 403 })
+    }
 
     const { data: fileRows, error: fileError } = await supabase
       .from('photo_files')

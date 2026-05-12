@@ -14,6 +14,24 @@ interface ProjectEditDialogProps {
   onSaved: (updated: Project) => void;
 }
 
+interface ProjectAssignmentItem {
+  adminUserId: string;
+  shortId: string;
+  username: string;
+  role: "super_admin" | "admin";
+  isActive: boolean;
+  isOwner: boolean;
+  assignedAt?: string;
+}
+
+interface AssignmentPermissions {
+  canManageAssignments: boolean;
+  isOwner: boolean;
+  isAssigned: boolean;
+  isSuperAdmin: boolean;
+  ownerAdminUserId: string | null;
+}
+
 type AssetKey = 'cover' | 'banner' | 'splash_poster' | 'loading_gif' | 'watermark_logo'
 type AssetValue = { url?: string; file_name?: string; mime_type?: string; file_size_bytes?: number; duration_seconds?: number; version_token?: string }
 type ProjectAssetsState = NonNullable<Project['project_assets']>
@@ -191,6 +209,13 @@ export default function ProjectEditDialog({
   const [cleanupConfirmOpen, setCleanupConfirmOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [assignments, setAssignments] = useState<ProjectAssignmentItem[]>([]);
+  const [assignmentPermissions, setAssignmentPermissions] = useState<AssignmentPermissions | null>(null);
+  const [assignmentInput, setAssignmentInput] = useState("");
+  const [assignmentsLoading, setAssignmentsLoading] = useState(false);
+  const [assignmentsSaving, setAssignmentsSaving] = useState(false);
+  const [assignmentError, setAssignmentError] = useState<string | null>(null);
+  const [assignmentNotice, setAssignmentNotice] = useState<string | null>(null);
   const [bannerEnabled, setBannerEnabled] = useState(Boolean(project.project_assets?.banner?.url));
   const [bannerExpanded, setBannerExpanded] = useState(false);
   const [posterEnabled, setPosterEnabled] = useState(Boolean(project.project_assets?.splash_poster?.url));
@@ -274,6 +299,43 @@ export default function ProjectEditDialog({
       void handleLoadFtpStatus();
     }
   }, [open, ftpEnabled]);
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+
+    const loadAssignments = async () => {
+      setAssignmentsLoading(true);
+      setAssignmentError(null);
+      setAssignmentNotice(null);
+      try {
+        const res = await fetch(`/api/projects/${project.id}/assignments`);
+        const body = await res.json().catch(() => null) as {
+          success?: boolean;
+          error?: string;
+          data?: { assignments?: ProjectAssignmentItem[]; permissions?: AssignmentPermissions };
+        } | null;
+
+        if (cancelled) return;
+        if (!res.ok || body?.success !== true) {
+          setAssignmentError(body?.error ?? 'Could not load assigned users');
+          return;
+        }
+
+        setAssignments(Array.isArray(body.data?.assignments) ? body.data!.assignments! : []);
+        setAssignmentPermissions(body.data?.permissions ?? null);
+      } catch {
+        if (!cancelled) setAssignmentError('Could not load assigned users');
+      } finally {
+        if (!cancelled) setAssignmentsLoading(false);
+      }
+    };
+
+    void loadAssignments();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, project.id]);
 
   useEffect(() => {
     if (!open) return
@@ -403,6 +465,70 @@ export default function ProjectEditDialog({
       setError('FTP ingest failed. Please try again.');
     } finally {
       setIngesting(false);
+    }
+  };
+
+  const handleAddAssignment = async () => {
+    const adminUserShortId = assignmentInput.trim().toUpperCase();
+    if (!adminUserShortId) return;
+
+    setAssignmentsSaving(true);
+    setAssignmentError(null);
+    setAssignmentNotice(null);
+    try {
+      const res = await fetch(`/api/projects/${project.id}/assignments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ adminUserShortId }),
+      });
+      const body = await res.json().catch(() => null) as {
+        success?: boolean;
+        error?: string;
+        data?: { assignments?: ProjectAssignmentItem[] };
+      } | null;
+
+      if (!res.ok || body?.success !== true) {
+        setAssignmentError(body?.error ?? 'Could not assign user');
+        return;
+      }
+
+      setAssignments(Array.isArray(body.data?.assignments) ? body.data!.assignments! : []);
+      setAssignmentInput('');
+      setAssignmentNotice('User assigned successfully');
+    } catch {
+      setAssignmentError('Could not assign user');
+    } finally {
+      setAssignmentsSaving(false);
+    }
+  };
+
+  const handleRemoveAssignment = async (adminUserId: string) => {
+    setAssignmentsSaving(true);
+    setAssignmentError(null);
+    setAssignmentNotice(null);
+    try {
+      const res = await fetch(`/api/projects/${project.id}/assignments`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ adminUserId }),
+      });
+      const body = await res.json().catch(() => null) as {
+        success?: boolean;
+        error?: string;
+        data?: { assignments?: ProjectAssignmentItem[] };
+      } | null;
+
+      if (!res.ok || body?.success !== true) {
+        setAssignmentError(body?.error ?? 'Could not remove user');
+        return;
+      }
+
+      setAssignments(Array.isArray(body.data?.assignments) ? body.data!.assignments! : []);
+      setAssignmentNotice('User removed successfully');
+    } catch {
+      setAssignmentError('Could not remove user');
+    } finally {
+      setAssignmentsSaving(false);
     }
   };
 
@@ -609,6 +735,59 @@ export default function ProjectEditDialog({
                 </select>
               </div>
             </div>
+
+            {assignmentPermissions?.canManageAssignments ? (
+              <div className="space-y-3 rounded-lg border border-border bg-background p-3">
+                <div>
+                  <h4 className="text-sm font-medium text-foreground">Assign users</h4>
+                  <p className="text-xs text-muted-foreground">Add a backend user by short ID so they can manage this project.</p>
+                </div>
+
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={assignmentInput}
+                    onChange={(e) => setAssignmentInput(e.target.value)}
+                    placeholder="Paste backend user short ID"
+                    className="flex h-9 w-full rounded-md border border-border bg-background px-3 py-1 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+                    disabled={assignmentsSaving}
+                  />
+                  <Button type="button" variant="outline" onClick={() => void handleAddAssignment()} disabled={assignmentsSaving || !assignmentInput.trim()}>
+                    Add
+                  </Button>
+                </div>
+
+                {assignmentError ? <p className="text-sm text-destructive">{assignmentError}</p> : null}
+                {assignmentNotice ? <p className="text-sm text-foreground">{assignmentNotice}</p> : null}
+                {assignmentsLoading ? <p className="text-sm text-muted-foreground">Loading assigned users…</p> : null}
+
+                <div className="space-y-2">
+                  {assignments.map((assignment) => (
+                    <div key={assignment.adminUserId} className="flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <p className="truncate text-sm font-medium text-foreground">{assignment.username}</p>
+                          <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">{assignment.isOwner ? 'Creator' : assignment.role === 'super_admin' ? 'Super admin' : 'Assigned'}</span>
+                        </div>
+                        <p className="truncate text-xs text-muted-foreground">{assignment.shortId}</p>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => void handleRemoveAssignment(assignment.adminUserId)}
+                        disabled={assignmentsSaving || assignment.isOwner}
+                      >
+                        {assignment.isOwner ? 'Locked' : 'Remove'}
+                      </Button>
+                    </div>
+                  ))}
+                  {!assignmentsLoading && assignments.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No assigned users yet.</p>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
           </div>
 
           <div className="space-y-3 rounded-lg border border-border bg-muted/30 p-4">
