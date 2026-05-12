@@ -1,10 +1,18 @@
 import { supabase } from '@/lib/supabase/server'
+import { getProjectPermissionContext } from '@/lib/auth/projectPermissions'
+import { requireAdminApiAuth } from '@/lib/auth/session'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
 export async function GET(_req: Request, context: RouteContext) {
+  const auth = await requireAdminApiAuth()
+  if (auth instanceof Response) return auth
+
   try {
     const { id } = await context.params
+    const permission = await getProjectPermissionContext(auth, id)
+    if (!permission.exists) return Response.json({ success: false, error: 'Not found' }, { status: 404 })
+    if (!permission.canAccessProject) return Response.json({ success: false, error: 'Forbidden' }, { status: 403 })
 
     const { data, error } = await supabase
       .from('project_folders')
@@ -26,8 +34,14 @@ export async function GET(_req: Request, context: RouteContext) {
 }
 
 export async function POST(req: Request, context: RouteContext) {
+  const auth = await requireAdminApiAuth()
+  if (auth instanceof Response) return auth
+
   try {
     const { id } = await context.params
+    const permission = await getProjectPermissionContext(auth, id)
+    if (!permission.exists) return Response.json({ success: false, error: 'Not found' }, { status: 404 })
+    if (!permission.canManageProject) return Response.json({ success: false, error: 'Forbidden' }, { status: 403 })
     const { name, parentId } = await req.json()
 
     if (!name || typeof name !== 'string' || !name.trim()) {
@@ -57,8 +71,14 @@ export async function POST(req: Request, context: RouteContext) {
 }
 
 export async function PATCH(req: Request, context: RouteContext) {
+  const auth = await requireAdminApiAuth()
+  if (auth instanceof Response) return auth
+
   try {
     const { id } = await context.params
+    const permission = await getProjectPermissionContext(auth, id)
+    if (!permission.exists) return Response.json({ success: false, error: 'Not found' }, { status: 404 })
+    if (!permission.canManageProject) return Response.json({ success: false, error: 'Forbidden' }, { status: 403 })
     const { folderId, name } = await req.json()
 
     if (!folderId || typeof folderId !== 'string') {
@@ -88,8 +108,14 @@ export async function PATCH(req: Request, context: RouteContext) {
 }
 
 export async function DELETE(req: Request, context: RouteContext) {
+  const auth = await requireAdminApiAuth()
+  if (auth instanceof Response) return auth
+
   try {
     const { id } = await context.params
+    const permission = await getProjectPermissionContext(auth, id)
+    if (!permission.exists) return Response.json({ success: false, error: 'Not found' }, { status: 404 })
+    if (!permission.canManageProject) return Response.json({ success: false, error: 'Forbidden' }, { status: 403 })
     const { folderIds, folderId } = await req.json()
 
     const seedIds = Array.isArray(folderIds)

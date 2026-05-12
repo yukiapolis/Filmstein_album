@@ -1,5 +1,7 @@
-import { supabase } from '../../../src/lib/supabase/client'
+import { supabase } from '@/lib/supabase/server'
 import { mapRowToProject } from '@/lib/mapProject'
+import { requireAdminApiAuth } from '@/lib/auth/session'
+import { getAccessibleProjectIdsForAdmin } from '@/lib/auth/projectPermissions'
 
 function sumProjectStorageUsedBytes(fileRows: Array<{ file_size_bytes?: unknown }>) {
   return fileRows.reduce((total, row) => total + (typeof row.file_size_bytes === 'number' ? row.file_size_bytes : 0), 0)
@@ -8,11 +10,25 @@ function sumProjectStorageUsedBytes(fileRows: Array<{ file_size_bytes?: unknown 
 const PROJECT_TYPES = new Set(['Wedding', 'Event', 'Campaign'])
 
 export async function GET() {
+  const auth = await requireAdminApiAuth()
+  if (auth instanceof Response) return auth
+
   try {
-    const { data, error } = await supabase
+    const accessibleProjectIds = await getAccessibleProjectIdsForAdmin(auth)
+    if (Array.isArray(accessibleProjectIds) && accessibleProjectIds.length === 0) {
+      return Response.json({ success: true, data: [] })
+    }
+
+    let projectsQuery = supabase
       .from('projects')
-      .select('id, name, client_name, description, type, status, cover_url, ftp_ingest, project_assets, visual_settings, created_at')
+      .select('id, name, client_name, description, type, status, cover_url, ftp_ingest, project_assets, visual_settings, created_at, created_by_admin_user_id')
       .order('created_at', { ascending: false })
+
+    if (Array.isArray(accessibleProjectIds)) {
+      projectsQuery = projectsQuery.in('id', accessibleProjectIds)
+    }
+
+    const { data, error } = await projectsQuery
 
     if (error) {
       return Response.json(
@@ -56,10 +72,15 @@ export async function GET() {
         }
       }
 
+      const isOwner = typeof row.created_by_admin_user_id === 'string' && row.created_by_admin_user_id === auth.id
       return mapRowToProject({
         ...(row as Record<string, unknown>),
         photo_count: photoCount ?? 0,
         storage_used_bytes: sumProjectStorageUsedBytes(fileRows),
+        permissions: {
+          canDelete: auth.role === 'super_admin' || isOwner,
+          canManageAssignments: auth.role === 'super_admin' || isOwner,
+        },
       })
     }))
 
@@ -73,6 +94,9 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
+  const auth = await requireAdminApiAuth()
+  if (auth instanceof Response) return auth
+
   try {
     const body = await req.json()
 
@@ -86,15 +110,16 @@ export async function POST(req: Request) {
       return Response.json({ success: false, error: 'Project name is required' }, { status: 400 })
     }
 
+    const insertPayload: Record<string, unknown> = {
+      name,
+      client_name: clientName,
+      type,
+      created_by_admin_user_id: auth.id,
+    }
+
     const { data, error } = await supabase
       .from('projects')
-      .insert([
-        {
-          name,
-          client_name: clientName,
-          type,
-        },
-      ])
+      .insert([insertPayload])
       .select()
 
     if (error) {

@@ -2,6 +2,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { ListObjectsV2Command, HeadObjectCommand } from '@aws-sdk/client-s3'
 import { r2 } from '@/lib/r2/client'
+import { supabase } from '@/lib/supabase/server'
 
 const THIRTY_MINUTES_MS = 30 * 60 * 1000
 
@@ -16,6 +17,46 @@ export type OrphanScanResult = {
   r2_orphans: { count: number; totalBytes: number; items: OrphanItem[] }
   local_orphans: { count: number; totalBytes: number; items: OrphanItem[] }
   db_orphans: { count: number; totalBytes: number; items: OrphanItem[] }
+}
+
+export async function loadProjectStorageScanScope(projectId: string) {
+  const { data: project, error: projectError } = await supabase
+    .from('projects')
+    .select('id, cover_url, project_assets')
+    .eq('id', projectId)
+    .maybeSingle()
+
+  if (projectError) {
+    throw projectError
+  }
+  if (!project) {
+    return null
+  }
+
+  const { data: photoRows, error: photoError } = await supabase
+    .from('photos')
+    .select('global_photo_id, original_file_id, retouched_file_id')
+    .eq('project_id', projectId)
+
+  if (photoError) {
+    throw photoError
+  }
+
+  const photoIds = (photoRows ?? []).map((row) => row.global_photo_id)
+  const { data: photoFiles, error: fileError } = await supabase
+    .from('photo_files')
+    .select('photo_id, object_key, storage_provider, bucket_name, file_size_bytes, created_at, branch_type')
+    .in('photo_id', photoIds.length > 0 ? photoIds : ['__none__'])
+
+  if (fileError) {
+    throw fileError
+  }
+
+  return {
+    project,
+    photos: photoRows ?? [],
+    photoFiles: photoFiles ?? [],
+  }
 }
 
 function summarize(items: OrphanItem[]) {

@@ -364,7 +364,7 @@ const ClientGallery = ({
           </div>
         ) : null}
 
-        <main className="mx-auto w-full max-w-7xl bg-surface px-0 py-2 sm:px-3 sm:py-4 lg:px-8 lg:py-10">
+        <main className="mx-auto w-full max-w-7xl bg-surface px-0 pt-0 pb-2 sm:px-3 sm:py-4 lg:px-8 lg:py-10">
           {loading ? (
             <p className="py-12 text-center text-sm text-muted-foreground">Loading photos…</p>
           ) : error ? (

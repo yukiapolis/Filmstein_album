@@ -1,10 +1,14 @@
 import { supabase } from '@/lib/supabase/server'
+import { requireAdminApiAuth } from '@/lib/auth/session'
 
 const ALLOWED_COLORS = new Set(['red', 'green', 'blue', 'yellow', 'purple'])
 
 type RouteContext = { params: Promise<{ id: string }> }
 
 export async function POST(req: Request, context: RouteContext) {
+  const auth = await requireAdminApiAuth()
+  if (auth instanceof Response) return auth
+
   try {
     const { id: photoId } = await context.params
     const body = await req.json()

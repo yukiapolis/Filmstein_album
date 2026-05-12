@@ -2,6 +2,7 @@ import { DeleteObjectCommand } from '@aws-sdk/client-s3'
 import { promises as fs } from 'node:fs'
 import { supabase } from '@/lib/supabase/server'
 import { r2 } from '@/lib/r2/client'
+import { requireAdminApiAuth } from '@/lib/auth/session'
 import { getLatestVersionNo, getVersionFiles, groupPhotoFilesByVersion, type PhotoFileRow } from '@/lib/photoVersions'
 
 type RouteContext = { params: Promise<{ id: string }> }
@@ -36,6 +37,9 @@ async function deleteStoredAsset(file: FileRow) {
 }
 
 export async function PATCH(req: Request, context: RouteContext) {
+  const auth = await requireAdminApiAuth()
+  if (auth instanceof Response) return auth
+
   try {
     const { id } = await context.params
     const body = await req.json()
@@ -61,6 +65,9 @@ export async function PATCH(req: Request, context: RouteContext) {
 }
 
 export async function DELETE(req: Request, context: RouteContext) {
+  const auth = await requireAdminApiAuth()
+  if (auth instanceof Response) return auth
+
   try {
     const { id } = await context.params
     const url = new URL(req.url)

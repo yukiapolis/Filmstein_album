@@ -1,8 +1,12 @@
 import { supabase } from '@/lib/supabase/server'
+import { requireAdminApiAuth } from '@/lib/auth/session'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
 export async function GET(_req: Request, context: RouteContext) {
+  const auth = await requireAdminApiAuth()
+  if (auth instanceof Response) return auth
+
   try {
     const { id } = await context.params
 

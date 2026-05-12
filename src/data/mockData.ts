@@ -7,6 +7,11 @@ export type ColorLabel = "red" | "green" | "blue" | "yellow" | "purple" | "none"
 export interface Project {
   id: string;
   name: string;
+  createdByAdminUserId?: string;
+  permissions?: {
+    canDelete?: boolean;
+    canManageAssignments?: boolean;
+  };
   type: ProjectType;
   date: string;
   created_at?: string;
@@ -54,6 +59,13 @@ export interface PhotoClientMarkDetail {
   viewerSessionId: string;
   createdAt?: string;
   label: string;
+}
+
+export interface AdminUserIdentity {
+  id: string;
+  shortId?: string;
+  username: string;
+  role: "super_admin" | "admin";
 }
 
 export interface Photo {

@@ -1,6 +1,7 @@
 import { PutObjectCommand } from '@aws-sdk/client-s3'
 import { r2 } from '@/lib/r2/client'
 import { supabase } from '@/lib/supabase/server'
+import { requireAdminApiAuth } from '@/lib/auth/session'
 
 const ASSET_RULES: Record<string, { maxBytes: number; mime: RegExp }> = {
   cover: { maxBytes: 1024 * 1024, mime: /^image\/(jpeg|jpg|png|webp)$/i },
@@ -13,6 +14,9 @@ const ASSET_RULES: Record<string, { maxBytes: number; mime: RegExp }> = {
 type RouteContext = { params: Promise<{ id: string }> }
 
 export async function POST(req: Request, context: RouteContext) {
+  const auth = await requireAdminApiAuth()
+  if (auth instanceof Response) return auth
+
   try {
     const { id } = await context.params
     const form = await req.formData()
