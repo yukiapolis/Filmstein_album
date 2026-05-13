@@ -3,9 +3,10 @@
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Aperture, Check, Copy, LogOut } from "lucide-react";
+import { Check, Copy, LogOut } from "lucide-react";
 import type { ReactNode } from "react";
 
+import SnapflareLogo from "@/components/SnapflareLogo";
 import { Button } from "@/components/ui/button";
 
 type CurrentAdminUser = {
@@ -84,12 +85,13 @@ const Navbar = ({ breadcrumb, actions }: { breadcrumb?: ReactNode; actions?: Rea
     <header className="border-b border-border bg-card">
       <div className="container flex h-16 items-center justify-between gap-4">
         <div className="flex min-w-0 items-center gap-4">
-          <Link href="/" className="flex shrink-0 items-center gap-2">
-            <Aperture className="h-6 w-6 text-primary" />
-            <span className="flex flex-col items-start leading-none">
-              <span className="text-lg font-semibold text-foreground">Snapflare</span>
-              <span className="mt-px text-[11px] font-medium tracking-[0.02em] text-muted-foreground">by filmstein</span>
-            </span>
+          <Link href="/" className="flex shrink-0 items-center">
+            <SnapflareLogo
+              compact
+              wordmarkClassName="text-[1.15rem]"
+              subtitleClassName="text-[0.62rem] text-muted-foreground"
+              markClassName="h-7 w-[3.3rem]"
+            />
           </Link>
           {breadcrumb && <div className="min-w-0">{breadcrumb}</div>}
         </div>
