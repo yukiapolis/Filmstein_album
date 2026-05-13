@@ -5,7 +5,7 @@ import { Eye, EyeOff, Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import SnapflareLogo from "@/components/SnapflareLogo";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 
 type AuthMode = "login" | "register";
@@ -71,7 +71,6 @@ export default function LoginForm({ nextPath }: { nextPath: string }) {
             <SnapflareLogo />
           </div>
           <div className="text-center">
-            <CardTitle className="text-xl">Snapflare Admin</CardTitle>
             <CardDescription>{mode === "login" ? "Log in to access the dashboard." : "Create an admin account with an invite code."}</CardDescription>
           </div>
         </CardHeader>
