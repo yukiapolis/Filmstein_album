@@ -1,7 +1,7 @@
 import path from 'node:path'
 import crypto from 'node:crypto'
 import sharp from 'sharp'
-import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3'
+import { CopyObjectCommand, DeleteObjectCommand, GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3'
 
 import { supabase } from '@/lib/supabase/server'
 import { r2 } from '@/lib/r2/client'
@@ -303,14 +303,29 @@ async function uploadToR2(params: { key: string; body: Buffer; contentType: stri
   return buildR2PublicUrl(params.key)
 }
 
+function extractR2ObjectKey(objectKeyOrUrl: string) {
+  const base = (process.env.R2_PUBLIC_BASE_URL || process.env.NEXT_PUBLIC_PHOTO_PUBLIC_BASE_URL || '').replace(/\/+$/, '')
+  if (base && objectKeyOrUrl.startsWith(base + '/')) {
+    return objectKeyOrUrl.slice(base.length + 1)
+  }
+  return objectKeyOrUrl
+}
+
+async function copyR2Object(params: { sourceBucket: string; sourceKey: string; destinationKey: string; contentType?: string | null }) {
+  await r2.send(new CopyObjectCommand({
+    Bucket: process.env.R2_BUCKET_NAME!,
+    Key: params.destinationKey,
+    CopySource: `/${params.sourceBucket}/${params.sourceKey}`,
+    ContentType: params.contentType || undefined,
+    MetadataDirective: params.contentType ? 'REPLACE' : 'COPY',
+  }))
+
+  return buildR2PublicUrl(params.destinationKey)
+}
+
 async function deleteStoredAsset(file: { storage_provider?: string | null; bucket_name?: string | null; object_key?: string | null }) {
   if (file.storage_provider === 'r2' && file.bucket_name && file.object_key) {
-    const base = (process.env.R2_PUBLIC_BASE_URL || process.env.NEXT_PUBLIC_PHOTO_PUBLIC_BASE_URL || '').replace(/\/+$/, '')
-    const key = base && file.object_key.startsWith(base + '/')
-      ? file.object_key.slice(base.length + 1)
-      : file.object_key
-
-    await r2.send(new DeleteObjectCommand({ Bucket: file.bucket_name, Key: key }))
+    await r2.send(new DeleteObjectCommand({ Bucket: file.bucket_name, Key: extractR2ObjectKey(file.object_key) }))
   }
 }
 
@@ -426,18 +441,62 @@ async function setUploadSessionStatus(sessionId: string, patch: Record<string, u
   if (error) throw error
 }
 
-export async function processDirectUploadSession(sessionId: string) {
-  const { data: session, error: sessionError } = await supabase
+export async function claimUploadSessionForProcessing(sessionId: string) {
+  const { data, error } = await supabase
     .from('upload_sessions')
-    .select('*')
+    .update({ status: 'processing', processing_error: null })
     .eq('id', sessionId)
+    .eq('status', 'uploaded')
+    .select('*')
     .maybeSingle<UploadSessionRow>()
 
-  if (sessionError) throw sessionError
-  if (!session) throw new Error('Upload session not found')
-  if (!session.source_bucket_name || !session.source_object_key) throw new Error('Upload source is missing')
+  if (error) throw error
+  return data
+}
 
-  await setUploadSessionStatus(sessionId, { status: 'processing', processing_error: null })
+export async function runDirectUploadProcessingBatch(limit = 3) {
+  const { data: candidates, error } = await supabase
+    .from('upload_sessions')
+    .select('id')
+    .eq('status', 'uploaded')
+    .order('created_at', { ascending: true })
+    .limit(Math.max(1, Math.min(limit, 20)))
+
+  if (error) throw error
+
+  const results: Array<{ sessionId: string; success: boolean; error?: string }> = []
+
+  for (const candidate of candidates ?? []) {
+    const claimed = await claimUploadSessionForProcessing(String(candidate.id))
+    if (!claimed) continue
+
+    try {
+      await processDirectUploadSession(String(candidate.id), { alreadyClaimed: true })
+      results.push({ sessionId: String(candidate.id), success: true })
+    } catch (error) {
+      results.push({ sessionId: String(candidate.id), success: false, error: error instanceof Error ? error.message : 'Server error' })
+    }
+  }
+
+  return results
+}
+
+export async function processDirectUploadSession(sessionId: string, options?: { alreadyClaimed?: boolean }) {
+  const session = options?.alreadyClaimed
+    ? await (async () => {
+        const { data, error } = await supabase
+          .from('upload_sessions')
+          .select('*')
+          .eq('id', sessionId)
+          .maybeSingle<UploadSessionRow>()
+
+        if (error) throw error
+        return data
+      })()
+    : await claimUploadSessionForProcessing(sessionId)
+
+  if (!session) throw new Error('Upload session is not ready for processing')
+  if (!session.source_bucket_name || !session.source_object_key) throw new Error('Upload source is missing')
 
   let createdNewPhoto = false
   let targetPhotoId = session.target_photo_id?.trim() || null
@@ -518,8 +577,11 @@ export async function processDirectUploadSession(sessionId: string) {
     }
 
     const uploadKind = detectUploadKindByName(session.file_name)
-    const originalBuffer = await readR2ObjectBuffer(session.source_bucket_name, session.source_object_key)
-    const checksum = sha256(originalBuffer)
+    const needsImageBuffer = uploadKind === 'image'
+    const originalBuffer = needsImageBuffer
+      ? await readR2ObjectBuffer(session.source_bucket_name, session.source_object_key)
+      : null
+    const checksum = session.checksum_sha256
     const hasSystemPhotoIdPrefix = Boolean(session.file_name.match(GLOBAL_PHOTO_ID_RE)?.[0]?.toUpperCase())
     const overwriteOriginal = session.upload_decision === 'overwrite' || session.upload_category === 'overwrite-original'
     const originalBranchType = uploadKind === 'raw' ? BRANCH_TYPE_RAW : BRANCH_TYPE_ORIGINAL
@@ -594,9 +656,10 @@ export async function processDirectUploadSession(sessionId: string) {
     const baseKey = `${targetProjectId}/${targetPhotoId}`
     const originalDir = originalBranchType === BRANCH_TYPE_RAW ? 'raw' : 'original'
     const originalKey = `${baseKey}/${originalDir}/${originalStorageName}`
-    const originalUrl = await uploadToR2({
-      key: originalKey,
-      body: originalBuffer,
+    const originalUrl = await copyR2Object({
+      sourceBucket: session.source_bucket_name,
+      sourceKey: session.source_object_key,
+      destinationKey: originalKey,
       contentType: session.mime_type || 'application/octet-stream',
     })
     createdStoredAssets.push({ storage_provider: 'r2', bucket_name: process.env.R2_BUCKET_NAME!, object_key: originalUrl })
@@ -604,7 +667,7 @@ export async function processDirectUploadSession(sessionId: string) {
     let originalWidth: number | null = null
     let originalHeight: number | null = null
     let originalExif: Record<string, unknown> = {}
-    if (uploadKind === 'image') {
+    if (uploadKind === 'image' && originalBuffer) {
       const originalMeta = await getImageMetadata(originalBuffer)
       originalWidth = originalMeta.width
       originalHeight = originalMeta.height
@@ -640,7 +703,7 @@ export async function processDirectUploadSession(sessionId: string) {
 
     let displayUrl = ''
 
-    if (uploadKind === 'image') {
+    if (uploadKind === 'image' && originalBuffer) {
       const isRetouchUpload = session.upload_category === 'retouch' || (hasSystemPhotoIdPrefix && targetPhotoId !== null) || (targetPhotoId !== null && (looksLikeRetouchFile(session.file_name) || extractVersionNoFromFileName(session.file_name) !== null))
       const thumbBuffer = await buildThumb(originalBuffer)
       const displayBuffer = isRetouchUpload ? originalBuffer : await buildDisplay(originalBuffer, session.display_preset)
@@ -750,7 +813,7 @@ export async function processDirectUploadSession(sessionId: string) {
 
     if (updateError) return rollback(updateError.message)
 
-    await deleteStoredAsset({ storage_provider: 'r2', bucket_name: session.source_bucket_name, object_key: buildR2PublicUrl(session.source_object_key) }).catch(() => undefined)
+    await deleteStoredAsset({ storage_provider: 'r2', bucket_name: session.source_bucket_name, object_key: session.source_object_key }).catch(() => undefined)
 
     await setUploadSessionStatus(sessionId, {
       status: 'completed',
