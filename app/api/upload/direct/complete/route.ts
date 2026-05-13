@@ -2,7 +2,6 @@ import { HeadObjectCommand } from '@aws-sdk/client-s3'
 
 import { requireAdminApiAuth } from '@/lib/auth/session'
 import { getProjectPermissionContext } from '@/lib/auth/projectPermissions'
-import { processDirectUploadSession } from '@/lib/uploadDirect'
 import { r2 } from '@/lib/r2/client'
 import { supabase } from '@/lib/supabase/server'
 
@@ -44,6 +43,9 @@ export async function POST(req: Request) {
     if (session.status === 'processing') {
       return Response.json({ success: true, data: { sessionId, status: 'processing' } })
     }
+    if (session.status === 'uploaded') {
+      return Response.json({ success: true, data: { sessionId, status: 'uploaded' } })
+    }
 
     if (!session.source_bucket_name || !session.source_object_key) {
       return Response.json({ success: false, error: 'Upload source is missing' }, { status: 400 })
@@ -68,15 +70,14 @@ export async function POST(req: Request) {
       return Response.json({ success: false, error: markUploadedError.message }, { status: 500 })
     }
 
-    void processDirectUploadSession(sessionId).catch(async (error) => {
-      console.error('[upload/direct/complete] background processing failed:', error)
-      await supabase
-        .from('upload_sessions')
-        .update({ status: 'failed', processing_error: error instanceof Error ? error.message : 'Server error' })
-        .eq('id', sessionId)
+    return Response.json({
+      success: true,
+      data: {
+        sessionId,
+        status: 'uploaded',
+        acceptedForBackgroundProcessing: true,
+      },
     })
-
-    return Response.json({ success: true, data: { sessionId, status: 'processing' } })
   } catch (error) {
     console.error('[upload/direct/complete] error:', error)
     return Response.json({ success: false, error: error instanceof Error ? error.message : 'Server error' }, { status: 500 })

@@ -16,6 +16,8 @@ const statusIcon = (status: UploadFile["status"]) => {
   switch (status) {
     case "Completed":
       return <CheckCircle2 className="h-4 w-4 text-green-600" />;
+    case "Uploaded":
+      return <CheckCircle2 className="h-4 w-4 text-primary" />;
     case "Failed":
       return <AlertCircle className="h-4 w-4 text-destructive" />;
     case "Uploading":
@@ -32,7 +34,7 @@ interface UploadFile {
   id: string;
   fileName: string;
   size: string;
-  status: "Pending" | "Analyzing" | "Uploading" | "Processing" | "Completed" | "Failed" | "Skipped";
+  status: "Pending" | "Analyzing" | "Uploading" | "Uploaded" | "Processing" | "Completed" | "Failed" | "Skipped";
   progress: number;
   analysisType?: "new" | "retouch" | "duplicate" | "unknown";
   classification?: "duplicate_original" | "retouch_upload" | "new_original" | "unknown" | "invalid_retouch_reference";
@@ -278,41 +280,6 @@ const UploadPanelContent = ({
     setShowNewFolder(false);
   };
 
-  const pollUploadSession = useCallback(async (sessionId: string, fileId: string) => {
-    for (let attempt = 0; attempt < 120; attempt += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-      const res = await fetch(`/api/upload/direct/sessions/${sessionId}`, { cache: "no-store" });
-      const body = await res.json().catch(() => null);
-      if (!res.ok || !body?.success || !body?.data) {
-        throw new Error(body?.error || `Failed to read upload session (${res.status})`);
-      }
-
-      const session = body.data as {
-        status: string;
-        processing_error?: string | null;
-        warnings?: string[] | null;
-      };
-
-      if (session.status === "completed") {
-        setFiles((prev) => prev.map((f) => f.id === fileId ? {
-          ...f,
-          status: "Completed",
-          progress: 100,
-          reason: session.warnings?.length ? `Completed with ${session.warnings.length} warning(s)` : "Upload completed",
-        } : f));
-        return true;
-      }
-
-      if (session.status === "failed") {
-        throw new Error(session.processing_error || "Server post-processing failed");
-      }
-
-      setStatus(fileId, "Processing", 100, "Main server is generating display / thumb / client preview…");
-    }
-
-    throw new Error("Upload processing timed out");
-  }, []);
-
   const uploadOne = async (file: UploadFile): Promise<boolean> => {
     if (!file._raw || !projectId) return false;
     if (!file.checksumSha256) {
@@ -365,7 +332,7 @@ const UploadPanelContent = ({
         (progress) => setStatus(file.id, "Uploading", progress, "Uploading original to R2…"),
       );
 
-      setStatus(file.id, "Processing", 100, "Original reached R2. Triggering server post-processing…");
+      setStatus(file.id, "Uploading", 100, "Original reached R2. Finalizing upload session…");
       const completeRes = await fetch("/api/upload/direct/complete", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -377,8 +344,15 @@ const UploadPanelContent = ({
         throw new Error(completeBody?.error || `Complete failed (${completeRes.status})`);
       }
 
-      await pollUploadSession(sessionId, file.id);
-      setFiles((prev) => prev.map((f) => f.id === file.id ? { ...f, _raw: undefined } : f));
+      setFiles((prev) => prev.map((f) => f.id === file.id ? {
+        ...f,
+        status: completeBody?.data?.status === "completed" ? "Completed" : "Uploaded",
+        progress: 100,
+        reason: completeBody?.data?.status === "completed"
+          ? "Upload completed"
+          : "Uploaded. Processing continues in the background — you can close this dialog.",
+        _raw: undefined,
+      } : f));
       return true;
     } catch (err) {
       console.error(`[UploadPanel] ${file.fileName} upload error:`, err);
@@ -428,8 +402,10 @@ const UploadPanelContent = ({
 
   const pendingCount = files.filter((f) => f.status === "Pending").length;
   const analyzingCount = files.filter((f) => f.status === "Analyzing").length;
+  const uploadedCount = files.filter((f) => f.status === "Uploaded").length;
   const processingCount = files.filter((f) => f.status === "Processing").length;
-  const allDone = pendingCount === 0 && analyzingCount === 0 && processingCount === 0 && files.length > 0;
+  const uploadingCount = files.filter((f) => f.status === "Uploading").length;
+  const allDone = pendingCount === 0 && analyzingCount === 0 && uploadingCount === 0 && files.length > 0;
   const pendingFiles = files.filter((f) => f.status === "Pending");
   const actionablePendingFiles = pendingFiles.filter((f) => f.classification !== "duplicate_original");
   const pendingRetouchCount = actionablePendingFiles.filter((f) => f.classification === "retouch_upload").length;
@@ -506,7 +482,7 @@ const UploadPanelContent = ({
               <option value="4000">Max edge 4000px</option>
             </select>
             <p className="text-xs text-muted-foreground">
-              Original files now go straight to R2. The main server only checks metadata and generates derived assets after upload.
+              Original files go straight to R2. After transfer finishes, background processing continues on the server and you can close this dialog.
             </p>
           </div>
 
@@ -535,7 +511,7 @@ const UploadPanelContent = ({
               <div className="flex items-center justify-between gap-2">
                 <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
                   Files ({files.length})
-                  {allDone && <span className="ml-1.5 text-green-600 normal-case font-normal tracking-normal">— All uploaded</span>}
+                  {allDone && <span className="ml-1.5 text-green-600 normal-case font-normal tracking-normal">— Upload transfer done</span>}
                 </p>
                 {pendingCount > 0 && (
                   <Button size="sm" variant="outline" type="button" onClick={handleUpload}>
@@ -544,6 +520,9 @@ const UploadPanelContent = ({
                 )}
                 {analyzingCount > 0 && (
                   <span className="text-xs text-muted-foreground">Analyzing {analyzingCount}…</span>
+                )}
+                {uploadedCount > 0 && (
+                  <span className="text-xs text-muted-foreground">{uploadedCount} queued for background processing</span>
                 )}
                 {processingCount > 0 && (
                   <span className="text-xs text-muted-foreground">Processing {processingCount}…</span>
@@ -567,7 +546,7 @@ const UploadPanelContent = ({
                         {file.classification === "unknown" && `Unknown${file.reason ? ` · ${file.reason}` : ""}`}
                         {!file.classification && (file.status === "Analyzing" ? "Analyzing…" : "Waiting for analyze…")}
                       </p>
-                      {file.reason && ["Uploading", "Processing", "Failed", "Completed", "Skipped"].includes(file.status) && (
+                      {file.reason && ["Uploading", "Uploaded", "Processing", "Failed", "Completed", "Skipped"].includes(file.status) && (
                         <p className="text-[11px] text-muted-foreground">{file.reason}</p>
                       )}
                     </div>
