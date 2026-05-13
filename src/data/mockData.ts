@@ -44,6 +44,10 @@ export interface Project {
       scale?: number;
       opacity?: number;
     };
+    share_access?: {
+      enabled?: boolean;
+      has_password?: boolean;
+    };
   };
 }
 
@@ -52,6 +56,8 @@ export interface Album {
   name: string;
   photoCount: number;
   parentId?: string;
+  accessMode?: 'public' | 'hidden' | 'password_protected';
+  unlocked?: boolean;
   children?: Album[];
 }
 

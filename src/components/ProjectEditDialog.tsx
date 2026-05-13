@@ -189,6 +189,8 @@ export default function ProjectEditDialog({
   const [watermarkOffsetY, setWatermarkOffsetY] = useState(String(project.visual_settings?.watermark?.offset_y ?? 0));
   const [watermarkScale, setWatermarkScale] = useState(String(project.visual_settings?.watermark?.scale ?? 1));
   const [watermarkOpacity, setWatermarkOpacity] = useState(String(project.visual_settings?.watermark?.opacity ?? 1));
+  const [sharePasswordEnabled, setSharePasswordEnabled] = useState(Boolean(project.visual_settings?.share_access?.enabled));
+  const [sharePasswordValue, setSharePasswordValue] = useState('');
   const [assetUploading, setAssetUploading] = useState<string | null>(null);
   const [ftpBufferApiBaseUrl, setFtpBufferApiBaseUrl] = useState((project as Project & { ftp_ingest?: { buffer_api_base_url?: string } }).ftp_ingest?.buffer_api_base_url || "");
   const [ftpProjectCode, setFtpProjectCode] = useState((project as Project & { ftp_ingest?: { project_code?: string } }).ftp_ingest?.project_code || "");
@@ -552,6 +554,21 @@ export default function ProjectEditDialog({
       }
 
       const nextCoverUrl = normalizedProjectAssets.cover?.url || ''
+      const nextVisualSettings = {
+        watermark: {
+          enabled: watermarkSectionEnabled ? watermarkEnabled : false,
+          position: watermarkPosition,
+          offset_x: Number(watermarkOffsetX) || 0,
+          offset_y: Number(watermarkOffsetY) || 0,
+          scale: clampWatermarkScale(Number(watermarkScale) || 1),
+          opacity: clampWatermarkOpacity(Number(watermarkOpacity)),
+        },
+        share_access: {
+          enabled: sharePasswordEnabled,
+          ...(sharePasswordValue.trim() ? { password: sharePasswordValue.trim() } : {}),
+        },
+      }
+
       const res = await fetch(`/api/projects/${project.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -569,16 +586,7 @@ export default function ProjectEditDialog({
             auto_sync_interval_seconds: Math.max(1, Number(ftpAutoSyncIntervalSeconds) || 15),
           },
           project_assets: normalizedProjectAssets,
-          visual_settings: {
-            watermark: {
-              enabled: watermarkSectionEnabled ? watermarkEnabled : false,
-              position: watermarkPosition,
-              offset_x: Number(watermarkOffsetX) || 0,
-              offset_y: Number(watermarkOffsetY) || 0,
-              scale: clampWatermarkScale(Number(watermarkScale) || 1),
-              opacity: clampWatermarkOpacity(Number(watermarkOpacity)),
-            },
-          },
+          visual_settings: nextVisualSettings,
         }),
       });
       const body = await res.json();
@@ -602,13 +610,11 @@ export default function ProjectEditDialog({
         },
         project_assets: normalizedProjectAssets,
         visual_settings: {
-          watermark: {
-            enabled: watermarkSectionEnabled ? watermarkEnabled : false,
-            position: watermarkPosition,
-            offset_x: Number(watermarkOffsetX) || 0,
-            offset_y: Number(watermarkOffsetY) || 0,
-            scale: clampWatermarkScale(Number(watermarkScale) || 1),
-            opacity: clampWatermarkOpacity(Number(watermarkOpacity)),
+          ...project.visual_settings,
+          ...nextVisualSettings,
+          share_access: {
+            enabled: sharePasswordEnabled,
+            has_password: sharePasswordEnabled ? true : false,
           },
         },
       });
@@ -788,6 +794,33 @@ export default function ProjectEditDialog({
                 </div>
               </div>
             ) : null}
+          </div>
+
+          <div className="space-y-3 rounded-lg border border-border bg-muted/30 p-4">
+            <div>
+              <h3 className="text-sm font-semibold text-foreground">Project Settings</h3>
+              <p className="text-xs text-muted-foreground">Control the client-facing entrance for this share page.</p>
+            </div>
+
+            <div className="rounded-lg border border-border bg-background p-4 space-y-3">
+              <label className="flex items-center gap-2 text-sm font-medium text-foreground">
+                <input type="checkbox" checked={sharePasswordEnabled} onChange={(e) => setSharePasswordEnabled(e.target.checked)} />
+                Enable project password
+              </label>
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-foreground">Project share password</label>
+                <input
+                  type="password"
+                  value={sharePasswordValue}
+                  onChange={(e) => setSharePasswordValue(e.target.value)}
+                  placeholder={project.visual_settings?.share_access?.has_password ? 'Leave blank to keep current password' : 'Enter a project password'}
+                  className="flex h-9 w-full rounded-md border border-border bg-background px-3 py-1 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+                />
+                <p className="text-xs text-muted-foreground">
+                  When enabled, clients must enter this password once per device/session before viewing the share project.
+                </p>
+              </div>
+            </div>
           </div>
 
           <div className="space-y-3 rounded-lg border border-border bg-muted/30 p-4">

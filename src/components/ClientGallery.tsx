@@ -23,6 +23,7 @@ import type { ColorLabel } from "@/data/mockData";
 import { buildAlbumsFromPhotos } from "@/lib/albumsFromPhotos";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import type { FolderMeta } from "@/lib/albumsFromPhotos";
 import { getClientHeroImage } from "@/lib/clientWatermark";
 
 const VIEWER_SESSION_STORAGE_KEY = 'filmstein-viewer-session-id'
@@ -112,7 +113,7 @@ const ClientGallery = ({
   const [project, setProject] = useState<Project | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [folders, setFolders] = useState<{ id: string; name: string }[]>([]);
+  const [folders, setFolders] = useState<FolderMeta[]>([]);
   const [activeAlbum, setActiveAlbum] = useState("all");
   const [expandedAlbums, setExpandedAlbums] = useState<Set<string>>(new Set());
   const [activeTag, setActiveTag] = useState<ColorLabel | "all">("all");
@@ -126,6 +127,13 @@ const ClientGallery = ({
   const [splashVisible, setSplashVisible] = useState(false)
   const [splashCountdown, setSplashCountdown] = useState(0)
   const [viewerSessionId, setViewerSessionId] = useState('')
+  const [requiresProjectPassword, setRequiresProjectPassword] = useState(false)
+  const [projectUnlocked, setProjectUnlocked] = useState(true)
+  const [projectPassword, setProjectPassword] = useState('')
+  const [unlockingProject, setUnlockingProject] = useState(false)
+  const [albumPassword, setAlbumPassword] = useState('')
+  const [lockedAlbumId, setLockedAlbumId] = useState<string | null>(null)
+  const [unlockingAlbum, setUnlockingAlbum] = useState(false)
 
   useEffect(() => {
     setViewerSessionId(getOrCreateViewerSessionId())
@@ -147,54 +155,62 @@ const ClientGallery = ({
     if (!id || !viewerSessionId) return;
 
     let cancelled = false;
-    setLoading(true);
-    setError(null);
 
-    (async () => {
+    const loadProject = async () => {
+      setLoading(true);
+      setError(null);
       try {
-        const [projRes, foldersRes] = await Promise.all([
-          fetch(`/api/projects/${id}?publishedOnly=true&viewerSessionId=${encodeURIComponent(viewerSessionId)}`),
-          fetch(`/api/projects/${id}/folders`),
-        ]);
-        const projBody = await projRes.json();
-        const foldersBody = await foldersRes.json();
+        const projRes = await fetch(`/api/projects/${id}?publishedOnly=true&viewerSessionId=${encodeURIComponent(viewerSessionId)}`)
+        const projBody = await projRes.json()
 
-        if (!cancelled) {
-          if (projRes.ok && projBody.success === true) {
-            const fetched = (projBody.data?.photos ?? []) as Photo[];
-            const nextProject = (projBody.data?.project as Project) ?? null
-            setPhotos(fetched);
-            setProject(nextProject);
+        if (!projRes.ok || projBody.success !== true) {
+          if (!cancelled) setError('Could not load photos.')
+          return
+        }
 
-            const splashUrl = nextProject?.project_assets?.splash_poster?.url
-            if (splashUrl) {
-              const durationSeconds = Math.max(1, Number(nextProject.project_assets?.splash_poster?.duration_seconds ?? 3))
-              setSplashCountdown(durationSeconds)
-              setSplashVisible(true)
-              const timeoutId = window.setTimeout(() => {
-                setSplashVisible(false)
-              }, durationSeconds * 1000)
-              const intervalId = window.setInterval(() => {
-                setSplashCountdown((prev) => Math.max(0, prev - 1))
-              }, 1000)
-              window.setTimeout(() => window.clearInterval(intervalId), durationSeconds * 1000)
-              void timeoutId
-            }
-          } else {
-            setError("Could not load photos.");
-            return;
+        if (cancelled) return
+
+        const fetched = (projBody.data?.photos ?? []) as Photo[]
+        const nextProject = (projBody.data?.project as Project) ?? null
+        const nextAccess = projBody.data?.access as { requiresProjectPassword?: boolean; projectUnlocked?: boolean } | undefined
+        setPhotos(fetched)
+        setProject(nextProject)
+        setRequiresProjectPassword(nextAccess?.requiresProjectPassword === true)
+        const nextProjectUnlocked = nextAccess?.projectUnlocked !== false
+        setProjectUnlocked(nextProjectUnlocked)
+
+        if (nextProjectUnlocked) {
+          const foldersRes = await fetch(`/api/projects/${id}/folders?publishedOnly=true`)
+          const foldersBody = await foldersRes.json().catch(() => ({}))
+          if (!cancelled && foldersRes.ok && foldersBody.success === true) {
+            setFolders(Array.isArray(foldersBody.data) ? foldersBody.data as FolderMeta[] : [])
           }
+        } else {
+          setFolders([])
+        }
 
-          if (foldersRes.ok && foldersBody.success === true) {
-            setFolders(foldersBody.data ?? []);
-          }
+        const splashUrl = nextProject?.project_assets?.splash_poster?.url
+        if (splashUrl) {
+          const durationSeconds = Math.max(1, Number(nextProject.project_assets?.splash_poster?.duration_seconds ?? 3))
+          setSplashCountdown(durationSeconds)
+          setSplashVisible(true)
+          const timeoutId = window.setTimeout(() => {
+            setSplashVisible(false)
+          }, durationSeconds * 1000)
+          const intervalId = window.setInterval(() => {
+            setSplashCountdown((prev) => Math.max(0, prev - 1))
+          }, 1000)
+          window.setTimeout(() => window.clearInterval(intervalId), durationSeconds * 1000)
+          void timeoutId
         }
       } catch {
-        if (!cancelled) setError("Could not load photos.");
+        if (!cancelled) setError('Could not load photos.')
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) setLoading(false)
       }
-    })();
+    }
+
+    void loadProject()
 
     return () => {
       cancelled = true;
@@ -228,6 +244,8 @@ const ClientGallery = ({
   useEffect(() => {
     setSelections(new Set(photos.filter((p) => p.selected).map((p) => p.id)));
   }, [photos]);
+
+  const activeAlbumMeta = useMemo(() => folders.find((folder) => folder.id === activeAlbum) || null, [folders, activeAlbum])
 
   const folderFiltered = useMemo(() => {
     if (activeAlbum === "all") return photos;
@@ -290,13 +308,20 @@ const ClientGallery = ({
     try {
       const res = await fetch(`/api/projects/${id}?publishedOnly=true&viewerSessionId=${encodeURIComponent(viewerSessionId)}`);
       const body = await res.json();
-      if (res.ok && body.success && Array.isArray(body.data?.photos)) {
-        setPhotos(body.data.photos as Photo[]);
+      if (res.ok && body.success) {
+        const nextProjectUnlocked = body.data?.access?.projectUnlocked !== false
+        setPhotos(Array.isArray(body.data?.photos) ? body.data.photos as Photo[] : []);
         setProject((body.data?.project as Project) ?? null);
+        setRequiresProjectPassword(body.data?.access?.requiresProjectPassword === true);
+        setProjectUnlocked(nextProjectUnlocked);
+        if (nextProjectUnlocked) {
+          const fr = await fetch(`/api/projects/${id}/folders?publishedOnly=true`);
+          const fb = await fr.json().catch(() => ({}));
+          if (fr.ok && fb.success) setFolders(Array.isArray(fb.data) ? fb.data as FolderMeta[] : []);
+        } else {
+          setFolders([])
+        }
       }
-      const fr = await fetch(`/api/projects/${id}/folders`);
-      const fb = await fr.json();
-      if (fr.ok && fb.success) setFolders(fb.data ?? []);
     } catch {
       // ignore
     }
@@ -328,11 +353,83 @@ const ClientGallery = ({
       : item))
   }
 
+  const handleAlbumSelect = (albumId: string) => {
+    if (albumId === 'all') {
+      setActiveAlbum('all')
+      setLockedAlbumId(null)
+      setAlbumPassword('')
+      return
+    }
+
+    const album = folders.find((folder) => folder.id === albumId)
+    if (album?.access_mode === 'password_protected' && album.unlocked !== true) {
+      setLockedAlbumId(albumId)
+      setActiveAlbum(albumId)
+      return
+    }
+
+    setLockedAlbumId(null)
+    setAlbumPassword('')
+    setActiveAlbum(albumId)
+  }
+
+  const handleProjectUnlock = async () => {
+    if (!id) return
+    setUnlockingProject(true)
+    setError(null)
+    try {
+      const res = await fetch(`/api/share/${id}/unlock`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: projectPassword }),
+      })
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok || body.success !== true) {
+        setError(body?.error || 'Incorrect password')
+        return
+      }
+      setProjectPassword('')
+      setProjectUnlocked(true)
+      await handleRefresh()
+    } catch {
+      setError('Incorrect password')
+    } finally {
+      setUnlockingProject(false)
+    }
+  }
+
+  const handleAlbumUnlock = async () => {
+    if (!id || !lockedAlbumId) return
+    setUnlockingAlbum(true)
+    setError(null)
+    try {
+      const res = await fetch(`/api/share/${id}/albums/${lockedAlbumId}/unlock`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: albumPassword }),
+      })
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok || body.success !== true) {
+        setError(body?.error || 'Incorrect album password')
+        return
+      }
+      setAlbumPassword('')
+      setLockedAlbumId(null)
+      await handleRefresh()
+    } catch {
+      setError('Incorrect album password')
+    } finally {
+      setUnlockingAlbum(false)
+    }
+  }
+
   const cycleSort = () => {
     setSortDir((d) => (d === "desc" ? "asc" : "desc"));
   };
 
   const cleanPreview = presentation === "preview";
+  const showProjectPasswordGate = requiresProjectPassword && !projectUnlocked && !loading && !splashVisible
+  const showAlbumPasswordGate = !showProjectPasswordGate && !!lockedAlbumId && activeAlbumMeta?.access_mode === 'password_protected' && activeAlbumMeta?.unlocked !== true
   const showSidebar = !cleanPreview && viewMode !== "list";
 
   if (cleanPreview) {
@@ -367,6 +464,46 @@ const ClientGallery = ({
         <main className="mx-auto w-full max-w-7xl bg-surface px-0 pt-0 pb-2 sm:px-3 sm:py-4 lg:px-8 lg:py-10">
           {loading ? (
             <p className="py-12 text-center text-sm text-muted-foreground">Loading photos…</p>
+          ) : showProjectPasswordGate ? (
+            <section className="mx-auto max-w-md rounded-2xl border border-border bg-card p-6 shadow-sm">
+              <div className="space-y-3">
+                <h1 className="text-2xl font-semibold tracking-tight text-foreground">Enter project password</h1>
+                <p className="text-sm text-muted-foreground">This share project is password protected. Enter the password to continue.</p>
+                <Input
+                  type="password"
+                  value={projectPassword}
+                  onChange={(e) => setProjectPassword(e.target.value)}
+                  placeholder="Project password"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !unlockingProject) void handleProjectUnlock()
+                  }}
+                />
+                {error ? <p className="text-sm text-destructive" role="alert">{error}</p> : null}
+                <Button type="button" onClick={() => void handleProjectUnlock()} disabled={unlockingProject || !projectPassword.trim()}>
+                  {unlockingProject ? <><Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />Unlocking…</> : 'Enter Project'}
+                </Button>
+              </div>
+            </section>
+          ) : showAlbumPasswordGate ? (
+            <section className="mx-auto max-w-md rounded-2xl border border-border bg-card p-6 shadow-sm">
+              <div className="space-y-3">
+                <h1 className="text-2xl font-semibold tracking-tight text-foreground">Enter album password</h1>
+                <p className="text-sm text-muted-foreground">This album is visible, but locked. Enter its password to view the photos inside.</p>
+                <Input
+                  type="password"
+                  value={albumPassword}
+                  onChange={(e) => setAlbumPassword(e.target.value)}
+                  placeholder="Album password"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !unlockingAlbum) void handleAlbumUnlock()
+                  }}
+                />
+                {error ? <p className="text-sm text-destructive" role="alert">{error}</p> : null}
+                <Button type="button" onClick={() => void handleAlbumUnlock()} disabled={unlockingAlbum || !albumPassword.trim()}>
+                  {unlockingAlbum ? <><Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />Unlocking…</> : 'Enter Album'}
+                </Button>
+              </div>
+            </section>
           ) : error ? (
             <p className="py-12 text-center text-sm text-destructive" role="alert">{error}</p>
           ) : (
@@ -394,7 +531,7 @@ const ClientGallery = ({
                     <div className="flex min-w-0 gap-2 overflow-x-auto pb-1">
                       <button
                         type="button"
-                        onClick={() => setActiveAlbum('all')}
+                        onClick={() => handleAlbumSelect('all')}
                         className={`shrink-0 rounded-full px-3 py-2 text-sm transition-colors ${activeAlbum === 'all' ? 'bg-primary text-primary-foreground' : 'bg-muted text-foreground hover:bg-accent'}`}
                       >
                         All Photos
@@ -403,7 +540,7 @@ const ClientGallery = ({
                         <button
                           key={album.id}
                           type="button"
-                          onClick={() => setActiveAlbum(album.id)}
+                          onClick={() => handleAlbumSelect(album.id)}
                           className={`shrink-0 rounded-full px-3 py-2 text-sm transition-colors ${activeAlbum === album.id ? 'bg-primary text-primary-foreground' : 'bg-muted text-foreground hover:bg-accent'}`}
                         >
                           {album.name}
@@ -543,7 +680,7 @@ const ClientGallery = ({
               <aside className="w-full shrink-0 space-y-4 lg:w-56">
                 <div className="rounded-xl border border-border bg-card p-3">
                   <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Albums</h2>
-                  <AlbumTree albums={albumsForUi} activeAlbumId={activeAlbum} onSelect={setActiveAlbum} expandedIds={expandedAlbums} onToggle={(albumId) => {
+                  <AlbumTree albums={albumsForUi} activeAlbumId={activeAlbum} onSelect={handleAlbumSelect} expandedIds={expandedAlbums} onToggle={(albumId) => {
                     setExpandedAlbums((prev) => {
                       const next = new Set(prev);
                       if (next.has(albumId)) next.delete(albumId); else next.add(albumId);

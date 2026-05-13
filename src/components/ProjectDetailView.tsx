@@ -20,6 +20,8 @@ import {
   List,
   Paintbrush,
   Settings,
+  Download,
+  Loader2,
 } from "lucide-react";
 import PhotoGrid, { type ViewMode } from "@/components/PhotoGrid";
 import StatusBadge from "@/components/StatusBadge";
@@ -39,6 +41,10 @@ interface FolderItem {
   id: string;
   name: string;
   parent_id?: string | null;
+  access_mode?: 'public' | 'hidden' | 'password_protected';
+  has_password?: boolean;
+  unlocked?: boolean;
+  photo_count?: number;
 }
 
 const getAllAlbumIds = (albums: Album[]): string[] =>
@@ -94,6 +100,8 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
   const [manageFoldersOpen, setManageFoldersOpen] = useState(false);
   const [managedFolderIds, setManagedFolderIds] = useState<Set<string>>(new Set());
   const [renamingFolderName, setRenamingFolderName] = useState("");
+  const [folderAccessDrafts, setFolderAccessDrafts] = useState<Record<string, { accessMode: 'public' | 'hidden' | 'password_protected'; password: string }>>({});
+  const [savingFolderAccessId, setSavingFolderAccessId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [sortKey, setSortKey] = useState<"date" | "name">("date");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
@@ -103,7 +111,9 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
   const [moving, setMoving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [publishing, setPublishing] = useState(false);
+  const [downloadingBatch, setDownloadingBatch] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [downloadChoiceOpen, setDownloadChoiceOpen] = useState(false);
 
   const refreshFolders = useCallback(async () => {
     try {
@@ -194,6 +204,21 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
       return next;
     });
   }, [albumsForUi]);
+
+  useEffect(() => {
+    setFolderAccessDrafts((prev) => {
+      const next = { ...prev }
+      for (const folder of folders) {
+        if (!next[folder.id]) {
+          next[folder.id] = {
+            accessMode: folder.access_mode || 'public',
+            password: '',
+          }
+        }
+      }
+      return next
+    })
+  }, [folders]);
 
   const toggleExpand = (albumId: string) => {
     setExpandedAlbums((prev) => {
@@ -342,6 +367,11 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
   const handleRefresh = async () => {
     await Promise.all([refreshPhotos(), refreshFolders()]);
   };
+
+  const getFolderAccessDraft = (folder: FolderItem) => folderAccessDrafts[folder.id] || {
+    accessMode: folder.access_mode || 'public',
+    password: '',
+  }
 
   const handleCreateFolder = async (name: string) => {
     const trimmed = name.trim();
@@ -545,6 +575,49 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
     }
   };
 
+  const handleBatchDownload = async (variant: 'preview' | 'original') => {
+    if (selectedPhotoIds.size === 0) return;
+    setDownloadingBatch(true);
+    try {
+      const res = await fetch('/api/photos/download-zip', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          photoIds: Array.from(selectedPhotoIds),
+          variant,
+        }),
+      });
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        alert(body?.error || 'Download failed');
+        return;
+      }
+
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = variant === 'original' ? 'photos-original.zip' : 'photos-preview.zip';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+
+      const skippedCount = Number(res.headers.get('X-Zip-Skipped-Count') || '0');
+      if (skippedCount > 0) {
+        alert(`${skippedCount} selected file(s) were skipped because they could not be downloaded.`);
+      }
+
+      setDownloadChoiceOpen(false);
+    } catch (err) {
+      console.error('Batch download failed:', err);
+      alert('Download failed');
+    } finally {
+      setDownloadingBatch(false);
+    }
+  };
+
   const toggleManagedFolder = (folderId: string, checked: boolean) => {
     setManagedFolderIds((prev) => {
       const next = new Set(prev);
@@ -573,6 +646,34 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
       console.error('Rename folder failed:', body.error);
     }
   };
+
+  const handleSaveFolderAccess = async (folder: FolderItem) => {
+    const draft = getFolderAccessDraft(folder)
+    setSavingFolderAccessId(folder.id)
+    try {
+      const res = await fetch(`/api/projects/${projectId}/folders`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          folderId: folder.id,
+          accessMode: draft.accessMode,
+          password: draft.accessMode === 'password_protected' ? draft.password : undefined,
+        }),
+      })
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok || body.success !== true) {
+        alert(body.error || 'Could not save album access')
+        return
+      }
+      setFolderAccessDrafts((prev) => ({ ...prev, [folder.id]: { accessMode: draft.accessMode, password: '' } }))
+      await refreshFolders()
+      await refreshPhotos()
+    } catch {
+      alert('Could not save album access')
+    } finally {
+      setSavingFolderAccessId(null)
+    }
+  }
 
   const handleDeleteManagedFolders = async () => {
     if (selectedManagedFolders.length === 0) return;
@@ -913,13 +1014,17 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
                   <Move className="mr-1 h-4 w-4" />
                   {moving ? "Moving…" : "Move"}
                 </Button>
-                <Button size="sm" variant="outline" type="button" onClick={() => void handleBatchPublish(true)} disabled={deleting || moving || publishing}>
+                <Button size="sm" variant="outline" type="button" onClick={() => void handleBatchPublish(true)} disabled={deleting || moving || publishing || downloadingBatch}>
                   {publishing ? "Publishing…" : "Publish"}
                 </Button>
-                <Button size="sm" variant="outline" type="button" onClick={() => void handleBatchPublish(false)} disabled={deleting || moving || publishing}>
+                <Button size="sm" variant="outline" type="button" onClick={() => void handleBatchPublish(false)} disabled={deleting || moving || publishing || downloadingBatch}>
                   {publishing ? "Publishing…" : "Unpublish"}
                 </Button>
-                <Button size="sm" variant="destructive" type="button" onClick={() => setDeleteConfirmOpen(true)} disabled={deleting || moving || publishing}>
+                <Button size="sm" variant="outline" type="button" onClick={() => setDownloadChoiceOpen(true)} disabled={deleting || moving || publishing || downloadingBatch}>
+                  {downloadingBatch ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Download className="mr-1 h-4 w-4" />}
+                  {downloadingBatch ? 'Downloading…' : 'Download'}
+                </Button>
+                <Button size="sm" variant="destructive" type="button" onClick={() => setDeleteConfirmOpen(true)} disabled={deleting || moving || publishing || downloadingBatch}>
                   {deleting ? "Deleting…" : "Delete"}
                 </Button>
                 <Button size="sm" variant="ghost" type="button" onClick={clearSelection}>
@@ -1024,24 +1129,76 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
                   <p className="text-sm text-muted-foreground">No albums yet.</p>
                 ) : (
                   <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
-                    {folders.map((folder) => (
-                      <label key={folder.id} className="flex items-center gap-3 rounded-lg border border-border px-3 py-2 text-sm">
-                        <input
-                          type="checkbox"
-                          checked={managedFolderIds.has(folder.id)}
-                          onChange={(e) => {
-                            toggleManagedFolder(folder.id, e.target.checked);
-                            if (e.target.checked && managedFolderIds.size === 0) {
-                              setRenamingFolderName(folder.name);
-                            }
-                          }}
-                        />
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate font-medium text-foreground">{folder.name}</p>
-                          {folder.parent_id && <p className="text-xs text-muted-foreground">Sub-album</p>}
+                    {folders.map((folder) => {
+                      const accessDraft = getFolderAccessDraft(folder)
+                      return (
+                        <div key={folder.id} className="rounded-lg border border-border px-3 py-3 text-sm space-y-3">
+                          <div className="flex items-center gap-3">
+                            <input
+                              type="checkbox"
+                              checked={managedFolderIds.has(folder.id)}
+                              onChange={(e) => {
+                                toggleManagedFolder(folder.id, e.target.checked);
+                                if (e.target.checked && managedFolderIds.size === 0) {
+                                  setRenamingFolderName(folder.name);
+                                }
+                              }}
+                            />
+                            <div className="min-w-0 flex-1">
+                              <p className="truncate font-medium text-foreground">{folder.name}</p>
+                              <p className="text-xs text-muted-foreground">{folder.parent_id ? 'Sub-album' : 'Top-level album'} · {folder.access_mode || 'public'}</p>
+                            </div>
+                          </div>
+
+                          <div className="grid gap-3 md:grid-cols-[180px_1fr_auto] md:items-end">
+                            <div className="space-y-1.5">
+                              <label className="text-xs font-medium text-foreground">Access mode</label>
+                              <select
+                                value={accessDraft.accessMode}
+                                onChange={(e) => setFolderAccessDrafts((prev) => ({
+                                  ...prev,
+                                  [folder.id]: {
+                                    accessMode: e.target.value as 'public' | 'hidden' | 'password_protected',
+                                    password: prev[folder.id]?.password || '',
+                                  },
+                                }))}
+                                className="flex h-9 w-full rounded-md border border-border bg-background px-3 py-1 text-sm text-foreground"
+                              >
+                                <option value="public">public</option>
+                                <option value="hidden">hidden</option>
+                                <option value="password_protected">password_protected</option>
+                              </select>
+                            </div>
+
+                            <div className="space-y-1.5">
+                              <label className="text-xs font-medium text-foreground">Album password</label>
+                              <Input
+                                type="password"
+                                value={accessDraft.password}
+                                onChange={(e) => setFolderAccessDrafts((prev) => ({
+                                  ...prev,
+                                  [folder.id]: {
+                                    accessMode: accessDraft.accessMode,
+                                    password: e.target.value,
+                                  },
+                                }))}
+                                placeholder={folder.has_password ? 'Leave blank to keep current password' : 'Enter album password'}
+                                disabled={accessDraft.accessMode !== 'password_protected'}
+                              />
+                            </div>
+
+                            <Button
+                              type="button"
+                              variant="outline"
+                              onClick={() => void handleSaveFolderAccess(folder)}
+                              disabled={savingFolderAccessId === folder.id || (accessDraft.accessMode === 'password_protected' && !folder.has_password && !accessDraft.password.trim())}
+                            >
+                              {savingFolderAccessId === folder.id ? 'Saving…' : 'Save access'}
+                            </Button>
+                          </div>
                         </div>
-                      </label>
-                    ))}
+                      )
+                    })}
                   </div>
                 )}
               </div>
@@ -1067,6 +1224,28 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
                   Delete selected
                 </Button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {downloadChoiceOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-md rounded-xl border border-border bg-card p-5 shadow-xl">
+            <h3 className="text-base font-semibold text-foreground">Batch Download</h3>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Choose which version to download as a zip package.
+            </p>
+            <div className="mt-4 flex justify-end gap-2">
+              <Button type="button" variant="outline" onClick={() => setDownloadChoiceOpen(false)} disabled={downloadingBatch}>
+                Cancel
+              </Button>
+              <Button type="button" variant="outline" onClick={() => void handleBatchDownload('preview')} disabled={downloadingBatch}>
+                Download Preview
+              </Button>
+              <Button type="button" onClick={() => void handleBatchDownload('original')} disabled={downloadingBatch}>
+                Download Original
+              </Button>
             </div>
           </div>
         </div>
