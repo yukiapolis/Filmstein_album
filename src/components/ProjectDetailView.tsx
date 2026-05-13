@@ -8,12 +8,14 @@ import {
   Upload,
   Share2,
   Eye,
+  RefreshCw,
+  ChevronDown,
+  ChevronRight,
   Pencil,
   Folder,
   Plus,
   X,
   Move,
-  RefreshCw,
   Search,
   ArrowUpDown,
   LayoutGrid,
@@ -305,6 +307,17 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
   }, [activeAlbum, albumsForUi]);
 
   const showSidebar = viewMode !== "list";
+  const [albumsOpen, setAlbumsOpen] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const media = window.matchMedia("(min-width: 1024px)");
+    const sync = () => setAlbumsOpen(media.matches);
+    sync();
+    media.addEventListener("change", sync);
+    return () => media.removeEventListener("change", sync);
+  }, []);
 
   const refreshPhotos = useCallback(async () => {
     try {
@@ -727,7 +740,7 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
     <div className="min-h-screen bg-surface">
       <Navbar
         breadcrumb={
-          <div className="flex min-w-0 items-center gap-2 text-sm">
+          <div className="hidden min-w-0 items-center gap-2 text-sm sm:flex">
             <Link
               href="/"
               className="shrink-0 text-muted-foreground transition-colors hover:text-foreground"
@@ -741,7 +754,7 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
               type="button"
               variant="outline"
               size="sm"
-              className="ml-3"
+              className="ml-3 hidden lg:inline-flex"
               onClick={() => setEditOpen(true)}
               disabled={loading || Boolean(error) || notFound}
             >
@@ -751,24 +764,33 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
           </div>
         }
         actions={
-          <div className="flex shrink-0 items-center gap-1.5">
+          <div className="flex w-full items-center gap-2 lg:w-auto">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="flex-1 lg:hidden"
+              onClick={() => setEditOpen(true)}
+              disabled={loading || Boolean(error) || notFound}
+            >
+              <Settings className="mr-1.5 h-3.5 w-3.5" />
+              Project Settings
+            </Button>
             <Button
               type="button"
               variant="ghost"
               size="icon"
-              className="h-9 w-9"
+              className="hidden lg:inline-flex h-9 w-9"
               title="Refresh"
               onClick={handleRefresh}
               disabled={loading || Boolean(error) || notFound}
             >
               <RefreshCw className="h-4 w-4" />
             </Button>
-            <Button variant="outline" size="sm" asChild>
+            <Button variant="outline" size="sm" className="hidden lg:inline-flex" asChild>
               <Link
                 href={`/projects/${projectId}/preview`}
-                className={
-                  loading || error || notFound ? "pointer-events-none opacity-50" : undefined
-                }
+                className={loading || error || notFound ? "pointer-events-none opacity-50" : undefined}
                 onClick={(e) => {
                   if (loading || error || notFound) e.preventDefault();
                 }}
@@ -780,6 +802,7 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
             <Button
               type="button"
               size="sm"
+              className="flex-1 lg:flex-none"
               onClick={() => setShareOpen(true)}
               disabled={loading || Boolean(error) || notFound}
             >
@@ -790,29 +813,36 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
         }
       />
 
-      <main className="container py-6">
+      <main className="container py-2 sm:py-6">
         {error && (
           <p className="mb-4 text-sm text-destructive" role="alert">
             {error}
           </p>
         )}
 
-        <div className="flex flex-col gap-6 lg:flex-row">
+        <div className="flex flex-col gap-3 lg:flex-row lg:gap-6">
           {showSidebar && (
             <aside className="w-full shrink-0 space-y-4 lg:w-56">
-              <div className="rounded-xl border border-border bg-card p-3">
-                <div className="mb-3 flex items-center justify-between">
-                  <div>
-                    <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                      Albums
-                    </h2>
-                    {activeAlbum !== 'all' && (
-                      <p className="mt-1 text-[11px] text-muted-foreground">
-                        New album will be created under the current album.
-                      </p>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-1">
+              <div className="w-full overflow-hidden rounded-xl border border-border bg-card p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setAlbumsOpen((prev) => !prev)}
+                    className="flex min-w-0 flex-1 items-start gap-2 text-left"
+                  >
+                    {albumsOpen ? <ChevronDown className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" /> : <ChevronRight className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />}
+                    <div className="min-w-0">
+                      <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                        Albums
+                      </h2>
+                      {activeAlbum !== 'all' && albumsOpen && (
+                        <p className="mt-1 text-[11px] text-muted-foreground">
+                          New album will be created under the current album.
+                        </p>
+                      )}
+                    </div>
+                  </button>
+                  <div className="flex shrink-0 items-center gap-1">
                     <button
                       type="button"
                       onClick={() => setManageFoldersOpen(true)}
@@ -823,7 +853,10 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
                     </button>
                     <button
                       type="button"
-                      onClick={() => setShowNewFolder(true)}
+                      onClick={() => {
+                        setAlbumsOpen(true);
+                        setShowNewFolder(true);
+                      }}
                       className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                       title="New album"
                     >
@@ -831,60 +864,89 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
                     </button>
                   </div>
                 </div>
-                <AlbumTree
-                  albums={albumsForUi}
-                  activeAlbumId={activeAlbum}
-                  onSelect={setActiveAlbum}
-                  expandedIds={expandedAlbums}
-                  onToggle={toggleExpand}
-                />
+                {albumsOpen && (
+                  <div className="mt-3">
+                    <AlbumTree
+                      albums={albumsForUi}
+                      activeAlbumId={activeAlbum}
+                      onSelect={setActiveAlbum}
+                      expandedIds={expandedAlbums}
+                      onToggle={toggleExpand}
+                    />
+                  </div>
+                )}
+              </div>
+              <div className="hidden rounded-xl border border-border bg-card p-3 lg:block">
+                <div className="flex flex-col gap-3">
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={() => setUploadOpen(true)}
+                    disabled={loading || Boolean(error) || notFound}
+                  >
+                    <Upload className="mr-1.5 h-3.5 w-3.5" />
+                    Upload
+                  </Button>
+                  <div className="relative w-full min-w-0">
+                    <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      placeholder="Search…"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="h-9 pl-8"
+                    />
+                  </div>
+                </div>
               </div>
             </aside>
           )}
 
-          <div className="min-w-0 flex-1 space-y-4">
+          <div className="min-w-0 flex-1 space-y-3 sm:space-y-4">
             {/* DAM toolbar */}
             <div className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4">
-              <div className="flex flex-wrap items-center gap-3">
-                <Button
-                  type="button"
-                  size="sm"
-                  onClick={() => setUploadOpen(true)}
-                  disabled={loading || Boolean(error) || notFound}
-                >
-                  <Upload className="mr-1.5 h-3.5 w-3.5" />
-                  Upload
-                </Button>
-                <div className="relative min-w-[160px] max-w-xs flex-1">
-                  <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-                  <Input
-                    placeholder="Search…"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="h-9 pl-8"
-                  />
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-xs font-medium text-muted-foreground">Color Label</span>
-                  <ColorFilterBar active="all" onChange={() => undefined} selectedColors={colorFilter} onToggleColor={toggleColorFilter} />
-                  <button
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center lg:hidden">
+                  <Button
                     type="button"
-                    onClick={() => setClientMarkedFilter((prev) => !prev)}
-                    className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${clientMarkedFilter ? 'bg-foreground text-background' : 'bg-muted text-muted-foreground hover:text-foreground'}`}
+                    size="sm"
+                    onClick={() => setUploadOpen(true)}
+                    disabled={loading || Boolean(error) || notFound}
                   >
-                    Client Tagged
-                  </button>
-                  <select
-                    value={publishFilter}
-                    onChange={(e) => setPublishFilter(e.target.value as "all" | "published" | "unpublished")}
-                    className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground"
-                  >
-                    <option value="all">All status</option>
-                    <option value="published">Published</option>
-                    <option value="unpublished">Unpublished</option>
-                  </select>
+                    <Upload className="mr-1.5 h-3.5 w-3.5" />
+                    Upload
+                  </Button>
+                  <div className="relative w-full min-w-0 sm:flex-1">
+                    <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      placeholder="Search…"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="h-9 pl-8"
+                    />
+                  </div>
                 </div>
-                <div className="ml-auto flex items-center gap-2">
+                <div className="min-w-0 overflow-hidden lg:flex-none lg:max-w-[720px]">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <ColorFilterBar active="all" onChange={() => undefined} selectedColors={colorFilter} onToggleColor={toggleColorFilter} />
+                    <button
+                      type="button"
+                      onClick={() => setClientMarkedFilter((prev) => !prev)}
+                      className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${clientMarkedFilter ? 'bg-foreground text-background' : 'bg-muted text-muted-foreground hover:text-foreground'}`}
+                    >
+                      Client Tagged
+                    </button>
+                    <select
+                      value={publishFilter}
+                      onChange={(e) => setPublishFilter(e.target.value as "all" | "published" | "unpublished")}
+                      className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground"
+                    >
+                      <option value="all">All status</option>
+                      <option value="published">Published</option>
+                      <option value="unpublished">Unpublished</option>
+                    </select>
+                  </div>
+                </div>
+                <div className="flex w-full flex-wrap items-center gap-2 lg:ml-auto lg:w-auto lg:justify-end">
                   <div className="flex items-center gap-1 rounded-lg border border-border p-1">
                     <button
                       type="button"
@@ -933,7 +995,7 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
               </div>
 
               {!showSidebar && (
-                <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                <div className="flex flex-wrap items-center gap-1.5 text-sm text-muted-foreground">
                   <button
                     type="button"
                     onClick={() => setActiveAlbum("all")}
@@ -958,7 +1020,7 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
             </div>
 
             {showNewFolder && (
-              <div className="flex items-center gap-3 rounded-lg border border-border bg-muted/50 p-3">
+              <div className="flex flex-col gap-3 rounded-lg border border-border bg-muted/50 p-3 sm:flex-row sm:items-center">
                 <Folder className="h-4 w-4 text-muted-foreground" />
                 <input
                   type="text"
@@ -1004,7 +1066,7 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
             )}
 
             {selectedPhotoIds.size > 0 && (
-              <div className="flex flex-wrap items-center gap-3 rounded-lg border border-primary/20 bg-primary/5 p-3">
+              <div className="flex flex-col gap-3 rounded-lg border border-primary/20 bg-primary/5 p-3 sm:flex-row sm:flex-wrap sm:items-center">
                 <span className="text-sm font-medium">{selectedPhotoIds.size} selected</span>
                 <div className="flex min-w-0 flex-1 items-center gap-2">
                   <Folder className="h-4 w-4 shrink-0 text-muted-foreground" />
@@ -1134,7 +1196,7 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
               </div>
               <Button variant="ghost" size="sm" onClick={() => setManageFoldersOpen(false)}>Close</Button>
             </div>
-            <div className="space-y-4 p-6">
+            <div className="max-h-[calc(100vh-8rem)] space-y-4 overflow-y-auto p-4 sm:p-6">
               <div className="space-y-2">
                 {folders.length === 0 ? (
                   <p className="text-sm text-muted-foreground">No albums yet.</p>
@@ -1216,7 +1278,7 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
 
               <div className="space-y-2">
                 <label className="text-sm font-medium text-foreground">Rename selected album</label>
-                <div className="flex gap-2">
+                <div className="flex flex-col gap-2 sm:flex-row">
                   <Input
                     value={renamingFolderName}
                     onChange={(e) => setRenamingFolderName(e.target.value)}
@@ -1229,9 +1291,9 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
                 </div>
               </div>
 
-              <div className="flex justify-between">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <p className="text-sm text-muted-foreground">Deleting albums moves their photos back to All Photos.</p>
-                <Button type="button" variant="destructive" onClick={() => void handleDeleteManagedFolders()} disabled={selectedManagedFolders.length === 0}>
+                <Button type="button" variant="destructive" className="w-full sm:w-auto" onClick={() => void handleDeleteManagedFolders()} disabled={selectedManagedFolders.length === 0}>
                   Delete selected
                 </Button>
               </div>
@@ -1247,14 +1309,14 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
             <p className="mt-2 text-sm text-muted-foreground">
               Choose which version to download as a zip package.
             </p>
-            <div className="mt-4 flex justify-end gap-2">
-              <Button type="button" variant="outline" onClick={() => setDownloadChoiceOpen(false)} disabled={downloadingBatch}>
+            <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <Button type="button" variant="outline" className="w-full sm:w-auto" onClick={() => setDownloadChoiceOpen(false)} disabled={downloadingBatch}>
                 Cancel
               </Button>
-              <Button type="button" variant="outline" onClick={() => void handleBatchDownload('preview')} disabled={downloadingBatch}>
+              <Button type="button" variant="outline" className="w-full sm:w-auto" onClick={() => void handleBatchDownload('preview')} disabled={downloadingBatch}>
                 Download Preview
               </Button>
-              <Button type="button" onClick={() => void handleBatchDownload('original')} disabled={downloadingBatch}>
+              <Button type="button" className="w-full sm:w-auto" onClick={() => void handleBatchDownload('original')} disabled={downloadingBatch}>
                 Download Original
               </Button>
             </div>
@@ -1269,13 +1331,14 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
             <p className="mt-2 text-sm text-muted-foreground">
               You can delete the current version of the selected photos, or delete the photos and all their versions. This action cannot be undone.
             </p>
-            <div className="mt-4 flex justify-end gap-2">
-              <Button type="button" variant="outline" onClick={() => setDeleteConfirmOpen(false)} disabled={deleting}>
+            <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <Button type="button" variant="outline" className="w-full sm:w-auto" onClick={() => setDeleteConfirmOpen(false)} disabled={deleting}>
                 Cancel
               </Button>
               <Button
                 type="button"
                 variant="outline"
+                className="w-full sm:w-auto"
                 onClick={async () => {
                   await handleBatchDelete('current-version');
                   setDeleteConfirmOpen(false);
@@ -1287,6 +1350,7 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
               <Button
                 type="button"
                 variant="destructive"
+                className="w-full sm:w-auto"
                 onClick={async () => {
                   await handleBatchDelete('all-versions');
                   setDeleteConfirmOpen(false);

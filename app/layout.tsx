@@ -15,6 +15,14 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Snapflare",
   description: "Photo project dashboard",
+  icons: {
+    icon: [
+      { url: "/icon", type: "image/png", sizes: "64x64" },
+      { url: "/favicon.ico" },
+    ],
+    shortcut: ["/icon"],
+    apple: [{ url: "/apple-icon", sizes: "180x180", type: "image/png" }],
+  },
 };
 
 const GIT_SHORT_HASH = "e5d9c16";

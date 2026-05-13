@@ -83,8 +83,8 @@ const Navbar = ({ breadcrumb, actions }: { breadcrumb?: ReactNode; actions?: Rea
 
   return (
     <header className="border-b border-border bg-card">
-      <div className="container flex h-16 items-center justify-between gap-4">
-        <div className="flex min-w-0 items-center gap-4">
+      <div className="container grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-4 py-3 sm:flex sm:h-16 sm:items-center sm:justify-between sm:py-0">
+        <div className="min-w-0 flex items-center gap-3 sm:gap-4 sm:flex-1">
           <Link href="/" className="flex shrink-0 items-center">
             <SnapflareLogo
               compact
@@ -93,50 +93,48 @@ const Navbar = ({ breadcrumb, actions }: { breadcrumb?: ReactNode; actions?: Rea
               markClassName="h-7 w-[3.3rem]"
             />
           </Link>
-          {breadcrumb && <div className="min-w-0">{breadcrumb}</div>}
+          {breadcrumb && <div className="min-w-0 flex-1">{breadcrumb}</div>}
         </div>
-        <div className="flex items-center gap-3">
-          {actions}
-          <div className="relative" ref={menuRef}>
-            <button
-              type="button"
-              onClick={() => setMenuOpen((open) => !open)}
-              className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-left text-xs font-medium text-primary-foreground transition hover:opacity-90"
-              aria-label="Open account menu"
-            >
-              {initials}
-            </button>
+        <div className="relative shrink-0 sm:order-3" ref={menuRef}>
+          <button
+            type="button"
+            onClick={() => setMenuOpen((open) => !open)}
+            className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-left text-xs font-medium text-primary-foreground transition hover:opacity-90"
+            aria-label="Open account menu"
+          >
+            {initials}
+          </button>
 
-            {menuOpen ? (
-              <div className="absolute right-0 top-full z-50 mt-2 w-72 rounded-xl border border-border bg-card p-3 shadow-xl">
-                <div className="space-y-1 border-b border-border pb-3">
-                  <p className="text-sm font-medium text-foreground">{currentUser?.username || "Admin"}</p>
-                  <p className="text-xs text-muted-foreground">{currentUser?.role === "super_admin" ? "Super admin" : "Admin"}</p>
-                </div>
+          {menuOpen ? (
+            <div className="absolute right-0 top-full z-50 mt-2 w-[min(18rem,calc(100vw-2rem))] rounded-xl border border-border bg-card p-3 shadow-xl">
+              <div className="space-y-1 border-b border-border pb-3">
+                <p className="text-sm font-medium text-foreground">{currentUser?.username || "Admin"}</p>
+                <p className="text-xs text-muted-foreground">{currentUser?.role === "super_admin" ? "Super admin" : "Admin"}</p>
+              </div>
 
-                <div className="space-y-2 py-3">
-                  <div className="rounded-lg border border-border bg-muted/30 p-3">
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="text-xs font-medium text-foreground">Your short ID</p>
-                        <p className="mt-1 break-all text-xs text-muted-foreground">{currentUser?.shortId || "Loading…"}</p>
-                      </div>
-                      <Button type="button" variant="outline" size="sm" onClick={() => void handleCopyUuid()} disabled={!currentUser?.id}>
-                        {copyState === "copied" ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-                        {copyState === "copied" ? "Copied" : copyState === "failed" ? "Retry" : "Copy"}
-                      </Button>
+              <div className="space-y-2 py-3">
+                <div className="rounded-lg border border-border bg-muted/30 p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-xs font-medium text-foreground">Your short ID</p>
+                      <p className="mt-1 break-all text-xs text-muted-foreground">{currentUser?.shortId || "Loading…"}</p>
                     </div>
+                    <Button type="button" variant="outline" size="sm" onClick={() => void handleCopyUuid()} disabled={!currentUser?.id}>
+                      {copyState === "copied" ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                      {copyState === "copied" ? "Copied" : copyState === "failed" ? "Retry" : "Copy"}
+                    </Button>
                   </div>
                 </div>
-
-                <Button type="button" variant="ghost" size="sm" className="w-full justify-start" onClick={handleLogout}>
-                  <LogOut className="h-4 w-4" />
-                  Logout
-                </Button>
               </div>
-            ) : null}
-          </div>
+
+              <Button type="button" variant="ghost" size="sm" className="w-full justify-start" onClick={handleLogout}>
+                <LogOut className="h-4 w-4" />
+                Logout
+              </Button>
+            </div>
+          ) : null}
         </div>
+        {actions ? <div className="col-span-2 sm:order-2 sm:col-span-1 sm:ml-auto">{actions}</div> : null}
       </div>
     </header>
   );

@@ -93,15 +93,15 @@ export default function ProjectListRow({ project }: { project: Project }) {
             </div>
           </div>
 
-          <div className="flex items-center justify-end gap-2 lg:min-w-[220px] lg:flex-none">
-            <Button type="button" variant="outline" size="sm" asChild>
+          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-end lg:min-w-[220px] lg:flex-none">
+            <Button type="button" variant="outline" size="sm" className="w-full sm:w-auto" asChild>
               <Link href={`/projects/${project.id}/preview`}>View</Link>
             </Button>
-            <Button type="button" variant="outline" size="sm" asChild>
+            <Button type="button" variant="outline" size="sm" className="w-full sm:w-auto" asChild>
               <Link href={`/projects/${project.id}`}>Manage</Link>
             </Button>
             {project.permissions?.canDelete !== false ? (
-              <Button type="button" variant="destructive" size="sm" onClick={() => setConfirmOpen(true)}>
+              <Button type="button" variant="destructive" size="sm" className="w-full sm:w-auto" onClick={() => setConfirmOpen(true)}>
                 Delete
               </Button>
             ) : null}
@@ -114,9 +114,9 @@ export default function ProjectListRow({ project }: { project: Project }) {
           <div className="w-full max-w-md rounded-xl border border-border bg-card p-5 shadow-xl">
             <h3 className="text-base font-semibold text-foreground">Delete project?</h3>
             <p className="mt-2 text-sm text-muted-foreground">This project and all associated data will be removed. Continue to second confirmation.</p>
-            <div className="mt-4 flex justify-end gap-2">
-              <Button type="button" variant="outline" onClick={() => setConfirmOpen(false)} disabled={deleting}>Cancel</Button>
-              <Button type="button" variant="destructive" onClick={() => { setConfirmOpen(false); setDangerConfirmOpen(true) }} disabled={deleting}>Continue</Button>
+            <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <Button type="button" variant="outline" className="w-full sm:w-auto" onClick={() => setConfirmOpen(false)} disabled={deleting}>Cancel</Button>
+              <Button type="button" variant="destructive" className="w-full sm:w-auto" onClick={() => { setConfirmOpen(false); setDangerConfirmOpen(true) }} disabled={deleting}>Continue</Button>
             </div>
           </div>
         </div>
@@ -127,9 +127,9 @@ export default function ProjectListRow({ project }: { project: Project }) {
           <div className="w-full max-w-md rounded-xl border border-border bg-card p-5 shadow-2xl">
             <h3 className="text-base font-semibold text-foreground">Confirm permanent deletion</h3>
             <p className="mt-2 text-sm text-muted-foreground">This will delete the project, related photos, photo_files, project assets, storage objects, and associated database records.</p>
-            <div className="mt-4 flex justify-end gap-2">
-              <Button type="button" variant="outline" onClick={() => setDangerConfirmOpen(false)} disabled={deleting}>Cancel</Button>
-              <Button type="button" variant="destructive" onClick={() => void handleDelete()} disabled={deleting}>{deleting ? 'Deleting…' : 'Delete project'}</Button>
+            <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <Button type="button" variant="outline" className="w-full sm:w-auto" onClick={() => setDangerConfirmOpen(false)} disabled={deleting}>Cancel</Button>
+              <Button type="button" variant="destructive" className="w-full sm:w-auto" onClick={() => void handleDelete()} disabled={deleting}>{deleting ? 'Deleting…' : 'Delete project'}</Button>
             </div>
           </div>
         </div>
