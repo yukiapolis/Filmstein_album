@@ -15,7 +15,7 @@ const ColorFilterBar = ({ active, onChange, selectedColors, onToggleColor }: Col
   const isMulti = Array.isArray(selectedColors) && typeof onToggleColor === 'function'
 
   return (
-    <div className="w-full overflow-x-auto overflow-y-hidden [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+    <div className="inline-block max-w-full overflow-x-auto overflow-y-hidden align-middle [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
       <div className="inline-flex min-w-max items-center gap-2 pr-2">
         <button
         type="button"

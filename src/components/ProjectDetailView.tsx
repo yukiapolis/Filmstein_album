@@ -876,35 +876,58 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
                   </div>
                 )}
               </div>
+              <div className="hidden rounded-xl border border-border bg-card p-3 lg:block">
+                <div className="flex flex-col gap-3">
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={() => setUploadOpen(true)}
+                    disabled={loading || Boolean(error) || notFound}
+                  >
+                    <Upload className="mr-1.5 h-3.5 w-3.5" />
+                    Upload
+                  </Button>
+                  <div className="relative w-full min-w-0">
+                    <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      placeholder="Search…"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="h-9 pl-8"
+                    />
+                  </div>
+                </div>
+              </div>
             </aside>
           )}
 
           <div className="min-w-0 flex-1 space-y-3 sm:space-y-4">
             {/* DAM toolbar */}
             <div className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4">
-              <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
-                <Button
-                  type="button"
-                  size="sm"
-                  onClick={() => setUploadOpen(true)}
-                  disabled={loading || Boolean(error) || notFound}
-                >
-                  <Upload className="mr-1.5 h-3.5 w-3.5" />
-                  Upload
-                </Button>
-                <div className="relative w-full min-w-0 sm:min-w-[160px] sm:max-w-xs sm:flex-1">
-                  <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-                  <Input
-                    placeholder="Search…"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="h-9 pl-8"
-                  />
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center lg:hidden">
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={() => setUploadOpen(true)}
+                    disabled={loading || Boolean(error) || notFound}
+                  >
+                    <Upload className="mr-1.5 h-3.5 w-3.5" />
+                    Upload
+                  </Button>
+                  <div className="relative w-full min-w-0 sm:flex-1">
+                    <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      placeholder="Search…"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="h-9 pl-8"
+                    />
+                  </div>
                 </div>
-                <div className="min-w-0 space-y-2 overflow-hidden">
-                  <span className="block text-xs font-medium text-muted-foreground">Color Label</span>
-                  <ColorFilterBar active="all" onChange={() => undefined} selectedColors={colorFilter} onToggleColor={toggleColorFilter} />
+                <div className="min-w-0 overflow-hidden lg:flex-none lg:max-w-[720px]">
                   <div className="flex flex-wrap items-center gap-2">
+                    <ColorFilterBar active="all" onChange={() => undefined} selectedColors={colorFilter} onToggleColor={toggleColorFilter} />
                     <button
                       type="button"
                       onClick={() => setClientMarkedFilter((prev) => !prev)}
@@ -923,7 +946,7 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
                     </select>
                   </div>
                 </div>
-                <div className="flex w-full flex-wrap items-center gap-2 sm:ml-auto sm:w-auto sm:justify-end">
+                <div className="flex w-full flex-wrap items-center gap-2 lg:ml-auto lg:w-auto lg:justify-end">
                   <div className="flex items-center gap-1 rounded-lg border border-border p-1">
                     <button
                       type="button"
