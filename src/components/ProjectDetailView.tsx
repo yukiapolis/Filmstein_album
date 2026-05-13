@@ -319,6 +319,17 @@ export default function ProjectDetailView({ projectId }: { projectId: string }) 
     }
   }, [projectId]);
 
+  useEffect(() => {
+    const hasProcessingPhotos = photos.some((photo) => Boolean(photo.processingState) && photo.processingState !== "failed");
+    if (!hasProcessingPhotos) return;
+
+    const timer = window.setInterval(() => {
+      void refreshPhotos();
+    }, 3000);
+
+    return () => window.clearInterval(timer);
+  }, [photos, refreshPhotos]);
+
   const toggleColorFilter = useCallback((color: ColorLabel) => {
     setColorFilter((prev) => prev.includes(color) ? prev.filter((value) => value !== color) : [...prev, color]);
   }, []);

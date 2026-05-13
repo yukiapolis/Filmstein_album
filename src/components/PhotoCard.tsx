@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Check, Download, Heart } from "lucide-react";
+import { AlertCircle, Check, Download, Heart, Loader2 } from "lucide-react";
 import type { Photo } from "@/data/mockData";
 import { colorLabelMap } from "@/data/mockData";
 import { cn } from "@/lib/utils";
@@ -78,8 +78,16 @@ const PhotoCard = ({
     setShowDownloadMenu(false);
   };
 
-  const imageSrc = (photo as Photo & { thumbUrl?: string; displayUrl?: string }).thumbUrl || photo.url;
+  const imageSrc = ((photo as Photo & { thumbUrl?: string; displayUrl?: string }).thumbUrl || photo.url || "").trim();
   const uploadedAt = photo.uploadedAt ? new Date(photo.uploadedAt).toLocaleString() : "Unknown time";
+  const isProcessingPlaceholder = Boolean(photo.processingState) && (!imageSrc || photo.isPlaceholder);
+  const processingLabel = photo.processingMessage || (photo.processingState === "failed"
+    ? "Processing failed"
+    : photo.processingState === "uploaded"
+      ? "Upload completed"
+      : photo.processingState === "processing"
+        ? "Generating previews..."
+        : "Uploading...");
 
   if (variant === "overlay") {
     return (
@@ -139,19 +147,33 @@ const PhotoCard = ({
       )}
     >
       <div
-        className={cn("group relative cursor-pointer overflow-hidden bg-muted", forceSquare ? "aspect-square rounded-none" : "aspect-[4/3] rounded-t-xl")}
-        onClick={onClick}
+        className={cn("group relative overflow-hidden bg-muted", forceSquare ? "aspect-square rounded-none" : "aspect-[4/3] rounded-t-xl", onClick && !isProcessingPlaceholder ? "cursor-pointer" : "cursor-default")}
+        onClick={isProcessingPlaceholder ? undefined : onClick}
       >
-        <img
-          src={imageSrc}
-          alt={photo.fileName}
-          className={cn(
-            "h-full w-full object-cover transition-all duration-300",
-            photo.isPublished === false ? "brightness-50" : "",
-            selected ? "scale-[0.97]" : "group-hover:scale-[1.02]",
-          )}
-          loading="lazy"
-        />
+        {isProcessingPlaceholder ? (
+          <div className="flex h-full w-full flex-col items-center justify-center gap-3 bg-muted/80 px-4 text-center">
+            {photo.processingState === "failed" ? (
+              <AlertCircle className="h-8 w-8 text-destructive" />
+            ) : (
+              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            )}
+            <div className="space-y-1">
+              <p className="line-clamp-2 text-sm font-medium text-foreground">{photo.fileName}</p>
+              <p className="text-xs text-muted-foreground">{processingLabel}</p>
+            </div>
+          </div>
+        ) : (
+          <img
+            src={imageSrc}
+            alt={photo.fileName}
+            className={cn(
+              "h-full w-full object-cover transition-all duration-300",
+              photo.isPublished === false ? "brightness-50" : "",
+              selected ? "scale-[0.97]" : "group-hover:scale-[1.02]",
+            )}
+            loading="lazy"
+          />
+        )}
 
         {selected && <div className="absolute inset-0 z-10 bg-black/20 pointer-events-none" />}
 
@@ -227,15 +249,21 @@ const PhotoCard = ({
             <span
               className={cn(
                 "inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
-                isEdited ? "bg-sky-50 text-sky-700" : "bg-muted text-muted-foreground"
+                isProcessingPlaceholder
+                  ? photo.processingState === "failed"
+                    ? "bg-destructive/10 text-destructive"
+                    : "bg-amber-50 text-amber-700"
+                  : isEdited
+                    ? "bg-sky-50 text-sky-700"
+                    : "bg-muted text-muted-foreground"
               )}
             >
-              {isEdited ? "Retouched" : "Original"}
+              {isProcessingPlaceholder ? (photo.processingState === "failed" ? "Failed" : "Processing") : (isEdited ? "Retouched" : "Original")}
             </span>
           </div>
           <p className="text-xs text-muted-foreground">{uploadedAt}</p>
         </div>
-        {!hideDownloadButton && (
+        {!hideDownloadButton && !isProcessingPlaceholder && (
           <div className="relative z-30 shrink-0 opacity-0 transition-opacity group-hover:opacity-100" ref={menuRef}>
             <button
               type="button"

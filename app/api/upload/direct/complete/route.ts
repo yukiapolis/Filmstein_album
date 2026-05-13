@@ -4,6 +4,7 @@ import { requireAdminApiAuth } from '@/lib/auth/session'
 import { getProjectPermissionContext } from '@/lib/auth/projectPermissions'
 import { r2 } from '@/lib/r2/client'
 import { supabase } from '@/lib/supabase/server'
+import { setPhotoPendingUploadState } from '@/lib/uploadDirect'
 
 export async function POST(req: Request) {
   const auth = await requireAdminApiAuth()
@@ -18,7 +19,7 @@ export async function POST(req: Request) {
 
     const { data: session, error: sessionError } = await supabase
       .from('upload_sessions')
-      .select('id, project_id, source_bucket_name, source_object_key, file_size_bytes, status')
+      .select('id, project_id, target_photo_id, file_name, source_bucket_name, source_object_key, file_size_bytes, status, classification, upload_decision, matched_photo_id')
       .eq('id', sessionId)
       .maybeSingle()
 
@@ -65,6 +66,21 @@ export async function POST(req: Request) {
       .from('upload_sessions')
       .update({ status: 'uploaded', processing_error: null })
       .eq('id', sessionId)
+
+    const shouldUsePlaceholderState = Boolean(session.target_photo_id)
+      && session.upload_decision !== 'overwrite'
+      && session.classification !== 'retouch_upload'
+      && !session.matched_photo_id
+
+    if (!markUploadedError && shouldUsePlaceholderState && session.target_photo_id) {
+      await setPhotoPendingUploadState({
+        photoId: String(session.target_photo_id),
+        sessionId,
+        fileName: String(session.file_name || 'untitled'),
+        status: 'uploaded',
+        message: 'Upload complete. Waiting for background processing…',
+      }).catch(() => undefined)
+    }
 
     if (markUploadedError) {
       return Response.json({ success: false, error: markUploadedError.message }, { status: 500 })

@@ -107,6 +107,10 @@ export interface Photo {
   hasClientMarks?: boolean;
   clientMarkDetails?: PhotoClientMarkDetail[];
   adminColorTags?: ColorLabel[];
+  isPlaceholder?: boolean;
+  processingState?: "uploading" | "uploaded" | "processing" | "failed";
+  processingMessage?: string;
+  uploadSessionId?: string;
 }
 
 export interface UploadFile {

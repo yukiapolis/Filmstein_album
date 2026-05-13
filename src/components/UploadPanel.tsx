@@ -346,11 +346,11 @@ const UploadPanelContent = ({
 
       setFiles((prev) => prev.map((f) => f.id === file.id ? {
         ...f,
-        status: completeBody?.data?.status === "completed" ? "Completed" : "Uploaded",
+        status: completeBody?.data?.status === "completed" ? "Completed" : "Processing",
         progress: 100,
         reason: completeBody?.data?.status === "completed"
           ? "Upload completed"
-          : "Uploaded. Processing continues in the background — you can close this dialog.",
+          : "Upload completed. Generating previews in the background — you can close this dialog.",
         _raw: undefined,
       } : f));
       return true;
