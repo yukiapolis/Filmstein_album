@@ -1,6 +1,13 @@
 import type { Album, Photo } from "@/data/mockData";
 
-export type FolderMeta = { id: string; name: string; parent_id?: string | null };
+export type FolderMeta = {
+  id: string;
+  name: string;
+  parent_id?: string | null;
+  photo_count?: number;
+  access_mode?: 'public' | 'hidden' | 'password_protected';
+  unlocked?: boolean;
+};
 
 /** Build album list for the sidebar: "All Photos" plus one entry per folder that has photos. */
 export function buildAlbumsFromPhotos(
@@ -21,6 +28,7 @@ export function buildAlbumsFromPhotos(
   );
 
   const counts = new Map<string, number>();
+  const countByFolderId = new Map<string, number>((folders ?? []).map((folder) => [folder.id, Number(folder.photo_count) || 0]))
   for (const p of photos) {
     const aid = p.albumId ?? p.folderId;
     if (aid) counts.set(aid, (counts.get(aid) ?? 0) + 1);
@@ -32,8 +40,10 @@ export function buildAlbumsFromPhotos(
     nodes.set(folder.id, {
       id: folder.id,
       name: folder.name,
-      photoCount: counts.get(folder.id) ?? 0,
+      photoCount: countByFolderId.get(folder.id) ?? counts.get(folder.id) ?? 0,
       parentId: folder.parent_id ?? undefined,
+      accessMode: folder.access_mode ?? 'public',
+      unlocked: folder.unlocked === true,
       children: [],
     });
   }
@@ -45,6 +55,8 @@ export function buildAlbumsFromPhotos(
         name: nameById.get(id) ?? id,
         photoCount,
         parentId: parentById.get(id) ?? undefined,
+        accessMode: 'public',
+        unlocked: true,
         children: [],
       });
     } else {

@@ -4,6 +4,7 @@ import { NextRequest } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import path from "node:path";
 import { getFirstVersionFiles, getLatestVersionFiles, type PhotoFileRow } from '@/lib/photoVersions'
+import { extractFolderShareAccessConfig, extractProjectShareAccessConfig, isFolderShareAccessGranted, isProjectShareAccessGranted } from '@/lib/shareAccess'
 
 function getSupabaseAdmin() {
   const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -67,7 +68,7 @@ async function resolveDownload(
     if (clientSafe) {
       const { data: photoRow, error: photoError } = await supabase
         .from('photos')
-        .select('global_photo_id, is_published')
+        .select('global_photo_id, is_published, project_id, folder_id, projects:project_id(visual_settings), project_folders:folder_id(access_mode, password_hash)')
         .eq('global_photo_id', id)
         .maybeSingle()
 
@@ -77,6 +78,21 @@ async function resolveDownload(
 
       if (!photoRow || photoRow.is_published !== true) {
         return Response.json({ error: 'Photo is not available for client download' }, { status: 403 });
+      }
+
+      const projectRow = Array.isArray(photoRow.projects) ? photoRow.projects[0] : photoRow.projects
+      const shareAccess = extractProjectShareAccessConfig(projectRow?.visual_settings)
+      if (shareAccess.enabled === true && shareAccess.password_hash && !isProjectShareAccessGranted(request, photoRow.project_id, shareAccess.password_hash)) {
+        return Response.json({ error: 'Project password is required before downloading this photo' }, { status: 403 })
+      }
+
+      const folderRow = Array.isArray(photoRow.project_folders) ? photoRow.project_folders[0] : photoRow.project_folders
+      const folderAccess = extractFolderShareAccessConfig(folderRow)
+      if (folderAccess.access_mode === 'hidden') {
+        return Response.json({ error: 'Photo is not available for client download' }, { status: 403 })
+      }
+      if (folderAccess.access_mode === 'password_protected' && folderAccess.password_hash && photoRow.folder_id && !isFolderShareAccessGranted(request, photoRow.project_id, photoRow.folder_id, folderAccess.password_hash)) {
+        return Response.json({ error: 'Album password is required before downloading this photo' }, { status: 403 })
       }
     }
 

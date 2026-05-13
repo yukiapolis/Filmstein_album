@@ -9,6 +9,7 @@ import { r2 } from '@/lib/r2/client'
 import fs from 'node:fs/promises'
 import { buildLegacyCopyFromPhotoFile } from '@/lib/photoFileCopies'
 import { getWatermarkVersionSignature } from '@/lib/clientWatermark'
+import { extractFolderShareAccessConfig, extractProjectShareAccessConfig, hashSharePassword, isFolderShareAccessGranted, isProjectShareAccessGranted } from '@/lib/shareAccess'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
@@ -50,6 +51,26 @@ export async function GET(req: Request, context: RouteContext) {
       return Response.json({ success: false, error: 'Not found' }, { status: 404 })
     }
 
+    const shareAccess = extractProjectShareAccessConfig(projectRow.visual_settings)
+    const requiresProjectPassword = publishedOnly && shareAccess.enabled === true && Boolean(shareAccess.password_hash)
+    const projectUnlocked = !requiresProjectPassword || isProjectShareAccessGranted(req, id, shareAccess.password_hash!)
+
+    if (publishedOnly && !projectUnlocked) {
+      const project = mapRowToProject(projectRow as Record<string, unknown>)
+      project.photoCount = 0
+      return Response.json({
+        success: true,
+        data: {
+          project,
+          photos: [],
+          access: {
+            requiresProjectPassword: true,
+            projectUnlocked: false,
+          },
+        },
+      })
+    }
+
     let photosQuery = supabase
       .from('photos')
       .select('global_photo_id, project_id, folder_id, original_file_id, retouched_file_id, color_label, status, updated_at, is_published')
@@ -59,7 +80,13 @@ export async function GET(req: Request, context: RouteContext) {
       photosQuery = photosQuery.eq('is_published', true)
     }
 
-    const { data: photoRows, error: photosError } = await photosQuery
+    const [{ data: rawPhotoRows, error: photosError }, { data: folderRows, error: folderRowsError }] = await Promise.all([
+      photosQuery,
+      supabase
+        .from('project_folders')
+        .select('id, access_mode, password_hash')
+        .eq('project_id', id),
+    ])
 
     if (photosError) {
       return Response.json(
@@ -67,8 +94,24 @@ export async function GET(req: Request, context: RouteContext) {
         { status: 500 },
       )
     }
+    if (folderRowsError) {
+      return Response.json(
+        { success: false, error: folderRowsError.message },
+        { status: 500 },
+      )
+    }
 
-    const photoIds = (photoRows ?? []).map((row) => row.global_photo_id)
+    const folderAccessById = new Map((folderRows ?? []).map((folder) => [folder.id, extractFolderShareAccessConfig(folder)]))
+    const photoRows = (rawPhotoRows ?? []).filter((row) => {
+      if (!publishedOnly || !row.folder_id) return true
+      const access = folderAccessById.get(row.folder_id)
+      if (!access || access.access_mode === 'public') return true
+      if (access.access_mode === 'hidden') return false
+      if (!access.password_hash) return true
+      return isFolderShareAccessGranted(req, id, row.folder_id, access.password_hash)
+    })
+
+    const photoIds = photoRows.map((row) => row.global_photo_id)
 
     const filesByPhotoId = new Map<string, FileRow[]>()
     if (photoIds.length > 0) {
@@ -182,7 +225,14 @@ export async function GET(req: Request, context: RouteContext) {
 
     return Response.json({
       success: true,
-      data: { project, photos },
+      data: {
+        project,
+        photos,
+        access: {
+          requiresProjectPassword,
+          projectUnlocked,
+        },
+      },
     })
   } catch {
     return Response.json({ success: false, error: 'Server error' }, { status: 500 })
@@ -204,6 +254,16 @@ export async function PATCH(req: Request, context: RouteContext) {
     }
     const body = await req.json()
 
+    const { data: existingProjectRow, error: existingProjectError } = await supabase
+      .from('projects')
+      .select('visual_settings')
+      .eq('id', id)
+      .maybeSingle()
+
+    if (existingProjectError) {
+      return Response.json({ success: false, error: existingProjectError.message }, { status: 500 })
+    }
+
     const updates: Record<string, unknown> = {}
     if (typeof body.name === 'string' && body.name.trim()) updates.name = body.name.trim()
     if (typeof body.client_name === 'string') updates.client_name = body.client_name.trim()
@@ -213,7 +273,39 @@ export async function PATCH(req: Request, context: RouteContext) {
     if (typeof body.cover_url === 'string') updates.cover_url = body.cover_url.trim()
     if (body.ftp_ingest && typeof body.ftp_ingest === 'object') updates.ftp_ingest = body.ftp_ingest
     if (body.project_assets && typeof body.project_assets === 'object') updates.project_assets = body.project_assets
-    if (body.visual_settings && typeof body.visual_settings === 'object') updates.visual_settings = body.visual_settings
+    if (body.visual_settings && typeof body.visual_settings === 'object') {
+      const incomingVisualSettings = body.visual_settings as Record<string, unknown>
+      const existingVisualSettings = (existingProjectRow?.visual_settings && typeof existingProjectRow.visual_settings === 'object')
+        ? existingProjectRow.visual_settings as Record<string, unknown>
+        : {}
+      const existingShareAccess = extractProjectShareAccessConfig(existingVisualSettings)
+      const incomingShareAccess = incomingVisualSettings.share_access && typeof incomingVisualSettings.share_access === 'object'
+        ? incomingVisualSettings.share_access as Record<string, unknown>
+        : null
+
+      const shareAccessEnabled = incomingShareAccess?.enabled === true
+      const nextPasswordRaw = typeof incomingShareAccess?.password === 'string' ? incomingShareAccess.password.trim() : ''
+      const nextShareAccess = incomingShareAccess
+        ? {
+            enabled: shareAccessEnabled,
+            password_hash: shareAccessEnabled
+              ? (nextPasswordRaw
+                  ? hashSharePassword(nextPasswordRaw)
+                  : (existingShareAccess.password_hash || ''))
+              : undefined,
+          }
+        : existingShareAccess
+
+      if (incomingShareAccess && shareAccessEnabled && !nextShareAccess.password_hash) {
+        return Response.json({ success: false, error: 'Project password is required when password protection is enabled' }, { status: 400 })
+      }
+
+      updates.visual_settings = {
+        ...existingVisualSettings,
+        ...incomingVisualSettings,
+        share_access: incomingShareAccess ? nextShareAccess : existingVisualSettings.share_access,
+      }
+    }
 
     if (Object.keys(updates).length === 0) {
       return Response.json({ success: false, error: 'No fields to update' }, { status: 400 })

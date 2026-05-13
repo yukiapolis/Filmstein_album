@@ -1,4 +1,5 @@
 import type { Project, ProjectStatus, ProjectType } from "@/data/mockData";
+import { sanitizeProjectVisualSettings } from "@/lib/shareAccess";
 
 const FALLBACK_COVER = "/default-cover.svg";
 
@@ -76,6 +77,6 @@ export function mapRowToProject(row: Record<string, unknown>): Project {
     permissions: typeof row.permissions === 'object' && row.permissions !== null ? row.permissions as { canDelete?: boolean; canManageAssignments?: boolean } : undefined,
     ftp_ingest: typeof row.ftp_ingest === 'object' && row.ftp_ingest !== null ? row.ftp_ingest : undefined,
     project_assets: typeof row.project_assets === 'object' && row.project_assets !== null ? row.project_assets : undefined,
-    visual_settings: typeof row.visual_settings === 'object' && row.visual_settings !== null ? row.visual_settings : undefined,
+    visual_settings: typeof row.visual_settings === 'object' && row.visual_settings !== null ? sanitizeProjectVisualSettings(row.visual_settings) as Record<string, unknown> : undefined,
   } as Project & { ftp_ingest?: Record<string, unknown>; project_assets?: Record<string, unknown>; visual_settings?: Record<string, unknown> };
 }
