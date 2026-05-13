@@ -17,6 +17,8 @@ export const metadata: Metadata = {
   description: "Photo project dashboard",
 };
 
+const GIT_SHORT_HASH = "e5d9c16";
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -30,7 +32,7 @@ export default function RootLayout({
       <body className="min-h-full flex flex-col">
         <div className="flex-1">{children}</div>
         <footer className="border-t border-border bg-background/90 px-4 py-3 text-center text-xs text-muted-foreground backdrop-blur">
-          Snapflare by filmstein.com Copyright 2026 v1.0.1 beta
+          Snapflare by filmstein.com · © 2026 · v1.0.1 beta · #{GIT_SHORT_HASH}
         </footer>
       </body>
     </html>
