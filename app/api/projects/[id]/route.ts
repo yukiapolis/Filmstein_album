@@ -10,6 +10,7 @@ import fs from 'node:fs/promises'
 import { buildLegacyCopyFromPhotoFile } from '@/lib/photoFileCopies'
 import { getWatermarkVersionSignature } from '@/lib/clientWatermark'
 import { extractFolderShareAccessConfig, extractProjectShareAccessConfig, hashSharePassword, isFolderShareAccessGranted, isProjectShareAccessGranted } from '@/lib/shareAccess'
+import { runDirectUploadProcessingBatch } from '@/lib/uploadDirect'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
@@ -110,6 +111,20 @@ export async function GET(req: Request, context: RouteContext) {
       if (!access.password_hash) return true
       return isFolderShareAccessGranted(req, id, row.folder_id, access.password_hash)
     })
+
+    const hasPendingPlaceholder = photoRows.some((row) => {
+      const metadata = row.metadata && typeof row.metadata === 'object' && !Array.isArray(row.metadata)
+        ? row.metadata as Record<string, unknown>
+        : null
+      const pendingUpload = metadata?.pending_upload
+      return Boolean(pendingUpload && typeof pendingUpload === 'object')
+    })
+
+    if (hasPendingPlaceholder) {
+      void runDirectUploadProcessingBatch(3).catch((error) => {
+        console.error('[projects/:id] placeholder batch trigger failed:', error)
+      })
+    }
 
     const photoIds = photoRows.map((row) => row.global_photo_id)
 

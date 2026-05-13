@@ -4,7 +4,7 @@ import { requireAdminApiAuth } from '@/lib/auth/session'
 import { getProjectPermissionContext } from '@/lib/auth/projectPermissions'
 import { r2 } from '@/lib/r2/client'
 import { supabase } from '@/lib/supabase/server'
-import { setPhotoPendingUploadState } from '@/lib/uploadDirect'
+import { claimUploadSessionForProcessing, processDirectUploadSession, setPhotoPendingUploadState } from '@/lib/uploadDirect'
 
 export async function POST(req: Request) {
   const auth = await requireAdminApiAuth()
@@ -85,6 +85,16 @@ export async function POST(req: Request) {
     if (markUploadedError) {
       return Response.json({ success: false, error: markUploadedError.message }, { status: 500 })
     }
+
+    void (async () => {
+      try {
+        const claimed = await claimUploadSessionForProcessing(sessionId)
+        if (!claimed) return
+        await processDirectUploadSession(sessionId, { alreadyClaimed: true })
+      } catch (error) {
+        console.error('[upload/direct/complete] background trigger failed:', error)
+      }
+    })()
 
     return Response.json({
       success: true,

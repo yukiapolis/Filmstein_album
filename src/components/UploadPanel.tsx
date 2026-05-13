@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, useCallback, useEffect } from "react";
+import { useRef, useState, useCallback, useEffect, useMemo } from "react";
 import { Upload, X, CheckCircle2, AlertCircle, Loader2, Clock, Folder, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -34,8 +34,12 @@ interface UploadFile {
   id: string;
   fileName: string;
   size: string;
+  sizeBytes?: number;
   status: "Pending" | "Analyzing" | "Uploading" | "Uploaded" | "Processing" | "Completed" | "Failed" | "Skipped";
   progress: number;
+  uploadedBytes?: number;
+  uploadStartedAt?: number;
+  uploadSpeedBps?: number;
   analysisType?: "new" | "retouch" | "duplicate" | "unknown";
   classification?: "duplicate_original" | "retouch_upload" | "new_original" | "unknown" | "invalid_retouch_reference";
   matchedPhotoId?: string | null;
@@ -81,19 +85,38 @@ const sha256Hex = async (file: File) => {
   return Array.from(new Uint8Array(digest)).map((value) => value.toString(16).padStart(2, "0")).join("");
 };
 
-const putFileToSignedUrl = (url: string, file: File, contentType: string, onProgress: (progress: number) => void) =>
+const formatSpeed = (bytesPerSecond: number): string => {
+  if (!Number.isFinite(bytesPerSecond) || bytesPerSecond <= 0) return "—";
+  if (bytesPerSecond < 1024) return `${bytesPerSecond.toFixed(0)} B/s`;
+  if (bytesPerSecond < 1024 * 1024) return `${(bytesPerSecond / 1024).toFixed(1)} KB/s`;
+  return `${(bytesPerSecond / (1024 * 1024)).toFixed(2)} MB/s`;
+};
+
+const formatDuration = (ms: number): string => {
+  if (!Number.isFinite(ms) || ms <= 0) return "<1s";
+  const totalSeconds = Math.ceil(ms / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes <= 0) return `${seconds}s`;
+  if (minutes < 60) return `${minutes}m ${seconds}s`;
+  const hours = Math.floor(minutes / 60);
+  const remMinutes = minutes % 60;
+  return `${hours}h ${remMinutes}m`;
+};
+
+const putFileToSignedUrl = (url: string, file: File, contentType: string, onProgress: (progress: number, loadedBytes: number, totalBytes: number) => void) =>
   new Promise<void>((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("PUT", url, true);
     xhr.setRequestHeader("Content-Type", contentType || "application/octet-stream");
     xhr.upload.onprogress = (event) => {
       if (event.lengthComputable) {
-        onProgress(Math.max(1, Math.min(99, Math.round((event.loaded / event.total) * 100))));
+        onProgress(Math.max(1, Math.min(99, Math.round((event.loaded / event.total) * 100))), event.loaded, event.total);
       }
     };
     xhr.onload = () => {
       if (xhr.status >= 200 && xhr.status < 300) {
-        onProgress(100);
+        onProgress(100, file.size, file.size);
         resolve();
       } else {
         reject(new Error(`R2 upload failed (${xhr.status})`));
@@ -122,6 +145,8 @@ const UploadPanelContent = ({
   const activeAnalyzeCountRef = useRef(0);
   const runAnalyzeQueueRef = useRef<() => void>(() => undefined);
   const inputRef = useRef<HTMLInputElement>(null);
+  const uploadProgressRef = useRef<Record<string, { lastLoaded: number; lastAt: number }>>({});
+  const queueSpeedSamplesRef = useRef<Array<{ at: number; uploadedBytes: number }>>([]);
 
   const applyAnalysisResult = useCallback((id: string, data?: UploadAnalysisData) => {
     setFiles((prev) => prev.map((file) => {
@@ -216,8 +241,11 @@ const UploadPanelContent = ({
       id: crypto.randomUUID(),
       fileName: f.name,
       size: formatFileSize(f.size),
+      sizeBytes: f.size,
       status: projectId ? "Analyzing" : "Pending",
       progress: 0,
+      uploadedBytes: 0,
+      uploadSpeedBps: 0,
       _raw: f,
     }));
 
@@ -244,9 +272,9 @@ const UploadPanelContent = ({
     setFiles((prev) => prev.filter((f) => f.id !== id));
   };
 
-  const setStatus = (id: string, status: UploadFile["status"], progress = 0, reason?: string) => {
+  const setStatus = (id: string, status: UploadFile["status"], progress = 0, reason?: string, patch?: Partial<UploadFile>) => {
     setFiles((prev) =>
-      prev.map((f) => (f.id === id ? { ...f, status, progress, reason: reason ?? f.reason } : f)),
+      prev.map((f) => (f.id === id ? { ...f, status, progress, reason: reason ?? f.reason, ...patch } : f)),
     );
   };
 
@@ -324,15 +352,42 @@ const UploadPanelContent = ({
       const sessionId = String(initBody.data.sessionId);
       setFiles((prev) => prev.map((f) => f.id === file.id ? { ...f, sessionId } : f));
 
-      setStatus(file.id, "Uploading", 0, "Uploading original to R2…");
+      const uploadStartedAt = Date.now();
+      uploadProgressRef.current[file.id] = { lastLoaded: 0, lastAt: uploadStartedAt };
+      queueSpeedSamplesRef.current.push({ at: uploadStartedAt, uploadedBytes: uploadedQueueBytes });
+      setStatus(file.id, "Uploading", 0, "Uploading original to R2…", { uploadStartedAt, uploadedBytes: 0, uploadSpeedBps: 0 });
       await putFileToSignedUrl(
         String(initBody.data.uploadUrl),
         file._raw,
         file._raw.type || "application/octet-stream",
-        (progress) => setStatus(file.id, "Uploading", progress, "Uploading original to R2…"),
+        (progress, loadedBytes) => {
+          const now = Date.now();
+          const prev = uploadProgressRef.current[file.id] || { lastLoaded: 0, lastAt: now };
+          const deltaBytes = Math.max(0, loadedBytes - prev.lastLoaded);
+          const deltaMs = Math.max(1, now - prev.lastAt);
+          const instantBps = (deltaBytes / deltaMs) * 1000;
+          uploadProgressRef.current[file.id] = { lastLoaded: loadedBytes, lastAt: now };
+          const otherUploadedBytes = files
+            .filter((candidate) => candidate.id !== file.id)
+            .reduce((sum, candidate) => {
+              if (candidate.status === "Completed" || candidate.status === "Uploaded" || candidate.status === "Processing") return sum + (candidate.sizeBytes || 0);
+              if (candidate.status === "Uploading") return sum + Math.min(candidate.uploadedBytes || 0, candidate.sizeBytes || 0);
+              return sum;
+            }, 0);
+          queueSpeedSamplesRef.current.push({ at: now, uploadedBytes: otherUploadedBytes + loadedBytes });
+          setStatus(file.id, "Uploading", progress, "Uploading original to R2…", {
+            uploadedBytes: loadedBytes,
+            uploadSpeedBps: instantBps,
+            uploadStartedAt,
+          });
+        },
       );
 
-      setStatus(file.id, "Uploading", 100, "Original reached R2. Finalizing upload session…");
+      setStatus(file.id, "Uploading", 100, "Original reached R2. Finalizing upload session…", {
+        uploadedBytes: file._raw.size,
+        uploadSpeedBps: 0,
+      });
+      queueSpeedSamplesRef.current.push({ at: Date.now(), uploadedBytes: uploadedQueueBytes - (file.uploadedBytes || 0) + file._raw.size });
       const completeRes = await fetch("/api/upload/direct/complete", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -346,17 +401,17 @@ const UploadPanelContent = ({
 
       setFiles((prev) => prev.map((f) => f.id === file.id ? {
         ...f,
-        status: completeBody?.data?.status === "completed" ? "Completed" : "Processing",
+        status: "Completed",
         progress: 100,
-        reason: completeBody?.data?.status === "completed"
-          ? "Upload completed"
-          : "Upload completed. Generating previews in the background — you can close this dialog.",
+        reason: "Upload completed. Previews will finish in the background — you can close this dialog.",
+        uploadedBytes: f.sizeBytes ?? f.uploadedBytes,
+        uploadSpeedBps: 0,
         _raw: undefined,
       } : f));
       return true;
     } catch (err) {
       console.error(`[UploadPanel] ${file.fileName} upload error:`, err);
-      setStatus(file.id, "Failed", 0, err instanceof Error ? err.message : "Upload failed");
+      setStatus(file.id, "Failed", 0, err instanceof Error ? err.message : "Upload failed", { uploadSpeedBps: 0 });
       return false;
     }
   };
@@ -399,6 +454,31 @@ const UploadPanelContent = ({
   };
 
   const fileNeedsDecision = (file: UploadFile) => file.classification === "duplicate_original" && !file.uploadDecision;
+
+  const totalQueueBytes = useMemo(() => files.reduce((sum, file) => sum + (file.sizeBytes || 0), 0), [files]);
+  const uploadedQueueBytes = useMemo(() => files.reduce((sum, file) => {
+    if (file.status === "Completed" || file.status === "Processing" || file.status === "Uploaded") return sum + (file.sizeBytes || 0);
+    if (file.status === "Uploading") return sum + Math.min(file.uploadedBytes || 0, file.sizeBytes || 0);
+    return sum;
+  }, 0), [files]);
+  const overallQueueProgress = totalQueueBytes > 0 ? Math.min(100, Math.round((uploadedQueueBytes / totalQueueBytes) * 100)) : 0;
+  const remainingQueueBytes = Math.max(0, totalQueueBytes - uploadedQueueBytes);
+
+  const averagedQueueSpeedBps = useMemo(() => {
+    const now = Date.now();
+    const samples = queueSpeedSamplesRef.current
+      .filter((sample) => now - sample.at <= 15000)
+      .sort((a, b) => a.at - b.at);
+    queueSpeedSamplesRef.current = samples;
+    if (samples.length < 2) return 0;
+    const first = samples[0];
+    const last = samples[samples.length - 1];
+    const deltaBytes = Math.max(0, last.uploadedBytes - first.uploadedBytes);
+    const deltaMs = Math.max(1, last.at - first.at);
+    return (deltaBytes / deltaMs) * 1000;
+  }, [uploadedQueueBytes]);
+
+  const estimatedQueueMs = averagedQueueSpeedBps > 0 ? (remainingQueueBytes / averagedQueueSpeedBps) * 1000 : NaN;
 
   const pendingCount = files.filter((f) => f.status === "Pending").length;
   const analyzingCount = files.filter((f) => f.status === "Analyzing").length;
@@ -508,7 +588,8 @@ const UploadPanelContent = ({
 
           {files.length > 0 && (
             <div className="space-y-2">
-              <div className="flex items-center justify-between gap-2">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-2">
                 <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
                   Files ({files.length})
                   {allDone && <span className="ml-1.5 text-green-600 normal-case font-normal tracking-normal">— Upload transfer done</span>}
@@ -530,6 +611,23 @@ const UploadPanelContent = ({
                 {pendingDuplicateCount > 0 && (
                   <span className="text-xs text-amber-700">{pendingDuplicateCount} duplicate file(s) need decision</span>
                 )}
+                </div>
+                {!allDone && (
+                  <div className="rounded-lg border border-border bg-muted/30 px-3 py-2">
+                    <div className="flex items-center justify-between gap-3 text-xs">
+                      <span className="text-muted-foreground">Queue progress</span>
+                      <span className="font-medium text-foreground">{overallQueueProgress}%</span>
+                    </div>
+                    <div className="mt-2 h-2 overflow-hidden rounded-full bg-muted">
+                      <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${overallQueueProgress}%` }} />
+                    </div>
+                    <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
+                      <span>{formatFileSize(uploadedQueueBytes)} / {formatFileSize(totalQueueBytes)}</span>
+                      <span>Average speed: {formatSpeed(averagedQueueSpeedBps)}</span>
+                      <span>ETA: {Number.isFinite(estimatedQueueMs) ? formatDuration(estimatedQueueMs) : "—"}</span>
+                    </div>
+                  </div>
+                )}
               </div>
               <ul className="max-h-80 space-y-2 overflow-y-auto pr-1">
                 {files.map((file) => (
@@ -546,8 +644,14 @@ const UploadPanelContent = ({
                         {file.classification === "unknown" && `Unknown${file.reason ? ` · ${file.reason}` : ""}`}
                         {!file.classification && (file.status === "Analyzing" ? "Analyzing…" : "Waiting for analyze…")}
                       </p>
-                      {file.reason && ["Uploading", "Uploaded", "Processing", "Failed", "Completed", "Skipped"].includes(file.status) && (
+                      {file.reason && ["Uploading", "Uploaded", "Processing", "Failed", "Skipped"].includes(file.status) && (
                         <p className="text-[11px] text-muted-foreground">{file.reason}</p>
+                      )}
+                      {(file.status === "Uploading" || (file.status === "Processing" && (file.uploadedBytes || 0) > 0)) && (
+                        <p className="text-[11px] text-muted-foreground">
+                          {formatFileSize(file.uploadedBytes || 0)} / {formatFileSize(file.sizeBytes || 0)}
+                          {file.status === "Uploading" ? ` · ${formatSpeed(file.uploadSpeedBps || 0)}` : ""}
+                        </p>
                       )}
                     </div>
                     {(file.status === "Uploading" || file.status === "Processing") && (

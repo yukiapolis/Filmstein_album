@@ -67,6 +67,7 @@ const PhotoGrid = ({
           {photos.map((photo, i) => {
             const listThumbSrc = ((photo as Photo & { thumbUrl?: string }).thumbUrl || photo.url || "").trim();
             const isProcessingPlaceholder = Boolean(photo.processingState) && (!listThumbSrc || photo.isPlaceholder);
+            const isPreviewUnavailable = isProcessingPlaceholder || !listThumbSrc;
             return (
               <div
                 key={photo.id}
@@ -74,7 +75,7 @@ const PhotoGrid = ({
                   isPhotoSelected(photo.id) ? "border-sky-400 bg-sky-50/50" : "border-border bg-card hover:bg-accent/50"
                 }`}
                 onClick={() => {
-                  if (!isProcessingPlaceholder) setPreviewIndex(i);
+                  if (!isPreviewUnavailable) setPreviewIndex(i);
                 }}
               >
                 {selectionActive && (
@@ -92,7 +93,7 @@ const PhotoGrid = ({
                   </button>
                 )}
                 <div className="relative shrink-0">
-                  {isProcessingPlaceholder ? (
+                  {isPreviewUnavailable ? (
                     <div className="flex h-10 w-10 items-center justify-center rounded bg-muted text-muted-foreground">
                       {photo.processingState === "failed" ? <AlertCircle className="h-4 w-4 text-destructive" /> : <Loader2 className="h-4 w-4 animate-spin text-primary" />}
                     </div>
@@ -116,7 +117,7 @@ const PhotoGrid = ({
                       </div>
                     )}
                   </div>
-                  <p className="text-xs text-muted-foreground">{photo.processingMessage || photo.tag}</p>
+                  <p className="text-xs text-muted-foreground">{photo.processingMessage || (!listThumbSrc ? "Preview not ready yet" : photo.tag)}</p>
                 </div>
                 <p className="hidden text-xs text-muted-foreground sm:block">{photo.uploadedAt}</p>
               </div>
