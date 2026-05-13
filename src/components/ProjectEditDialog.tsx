@@ -111,7 +111,7 @@ function AssetSection({
 
   return (
     <div className="rounded-lg border border-border bg-background">
-      <div className="flex items-center justify-between gap-3 px-4 py-3">
+      <div className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex min-w-0 items-center gap-3">
           {!alwaysVisible && setEnabled ? (
             <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
@@ -134,7 +134,7 @@ function AssetSection({
           </button>
         </div>
         {alwaysVisible || enabled ? (
-          <div className="flex items-center gap-2">
+          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
             <label className="inline-flex cursor-pointer items-center rounded-md border border-border px-3 py-2 text-xs font-medium text-foreground hover:bg-muted">
               {uploading ? 'Uploading…' : 'Upload'}
               <input
@@ -156,9 +156,9 @@ function AssetSection({
 
       {showContent && expanded ? (
         <div className="border-t border-border px-4 py-4">
-          <div className="flex flex-wrap items-start gap-4">
+          <div className="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-start">
             <AssetPreview asset={asset} label={title} previewUrl={previewUrl} />
-            <div className="min-w-[180px] flex-1 space-y-2 text-xs text-muted-foreground">
+            <div className="min-w-0 flex-1 space-y-2 text-xs text-muted-foreground sm:min-w-[180px]">
               <p>{asset?.url ? 'Uploaded and linked to project assets.' : 'No file uploaded yet.'}</p>
               {asset?.url ? <p className="break-all">{asset.url}</p> : null}
               {children}
@@ -664,9 +664,9 @@ export default function ProjectEditDialog({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="flex max-h-[calc(100vh-2rem)] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-border bg-card shadow-xl">
-        <div className="flex items-center justify-between border-b border-border px-6 py-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-3 sm:p-4">
+      <div className="flex max-h-[calc(100vh-1.5rem)] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-border bg-card shadow-xl sm:max-h-[calc(100vh-2rem)]">
+        <div className="flex items-center justify-between border-b border-border px-4 py-4 sm:px-6">
           <h2 className="text-base font-semibold text-foreground">Edit Project</h2>
           <button
             type="button"
@@ -677,7 +677,7 @@ export default function ProjectEditDialog({
           </button>
         </div>
 
-        <div className="space-y-4 overflow-y-auto p-6">
+        <div className="space-y-4 overflow-y-auto p-4 sm:p-6">
           <div className="space-y-4 rounded-lg border border-border bg-muted/30 p-4">
             <div>
               <h3 className="text-sm font-semibold text-foreground">Basic Information</h3>
@@ -717,7 +717,7 @@ export default function ProjectEditDialog({
               />
             </div>
 
-            <div className="flex gap-4">
+            <div className="flex flex-col gap-4 sm:flex-row">
               <div className="flex-1 space-y-1.5">
                 <label className="text-sm font-medium text-foreground" htmlFor="edit-type">Type</label>
                 <select
@@ -749,7 +749,7 @@ export default function ProjectEditDialog({
                   <p className="text-xs text-muted-foreground">Add a backend user by short ID so they can manage this project.</p>
                 </div>
 
-                <div className="flex gap-2">
+                <div className="flex flex-col gap-2 sm:flex-row">
                   <input
                     type="text"
                     value={assignmentInput}
@@ -769,7 +769,7 @@ export default function ProjectEditDialog({
 
                 <div className="space-y-2">
                   {assignments.map((assignment) => (
-                    <div key={assignment.adminUserId} className="flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2">
+                    <div key={assignment.adminUserId} className="flex flex-col gap-2 rounded-md border border-border px-3 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
                       <div className="min-w-0">
                         <div className="flex items-center gap-2">
                           <p className="truncate text-sm font-medium text-foreground">{assignment.username}</p>

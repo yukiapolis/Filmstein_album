@@ -37,7 +37,7 @@ export default function ShareModal({ open, onClose, projectId, projectName }: Sh
     }
   };
 
-  const handleOpenPreview = () => {
+  const handleOpenAlbum = () => {
     window.open(shareUrl, "_blank", "noopener,noreferrer");
   };
 
@@ -82,9 +82,9 @@ export default function ShareModal({ open, onClose, projectId, projectName }: Sh
 
         {/* Footer */}
         <div className="flex justify-end gap-2 border-t border-border px-6 py-4">
-          <Button variant="outline" type="button" onClick={handleOpenPreview}>
+          <Button variant="outline" type="button" onClick={handleOpenAlbum}>
             <ExternalLink className="mr-1.5 h-3.5 w-3.5" />
-            Open Preview
+            Open Album
           </Button>
           <Button type="button" onClick={handleCopy}>
             {copied ? (
