@@ -16,6 +16,8 @@ export function mapRowToPhoto(row: Record<string, unknown>) {
   const latestDisplayFile = asRecord(row.latest_display_file);
   const latestClientPreviewFile = asRecord(row.latest_client_preview_file);
   const firstOriginalFile = asRecord(row.first_original_file);
+  const metadata = asRecord(row.metadata);
+  const pendingUpload = asRecord(metadata?.pending_upload);
 
   const cardFile = latestThumbFile ?? latestDisplayFile ?? latestOriginalFile ?? firstOriginalFile ?? row;
   const displayActiveFile = latestDisplayFile ?? latestOriginalFile ?? firstOriginalFile ?? row;
@@ -43,8 +45,13 @@ export function mapRowToPhoto(row: Record<string, unknown>) {
     toStringValue(latestOriginalFile?.original_file_name) ||
     toStringValue(firstOriginalFile?.file_name) ||
     toStringValue(firstOriginalFile?.original_file_name) ||
+    toStringValue(pendingUpload?.file_name) ||
     "untitled";
 
+  const processingStateRaw = toStringValue(pendingUpload?.status);
+  const processingState = processingStateRaw === 'uploading' || processingStateRaw === 'uploaded' || processingStateRaw === 'processing' || processingStateRaw === 'failed'
+    ? processingStateRaw
+    : undefined;
   const photoStatus = versionCount > 1 ? "edited" : "original";
   const adminColorTags = Array.isArray(row.admin_color_tags)
     ? row.admin_color_tags.filter((value): value is string => typeof value === 'string')
@@ -81,7 +88,7 @@ export function mapRowToPhoto(row: Record<string, unknown>) {
     fileName,
     tag: toStringValue(row.tag),
     selected: false,
-    uploadedAt: toStringValue(displayActiveFile?.created_at) || toStringValue(latestOriginalFile?.created_at) || toStringValue(row.updated_at),
+    uploadedAt: toStringValue(displayActiveFile?.created_at) || toStringValue(latestOriginalFile?.created_at) || toStringValue(pendingUpload?.created_at) || toStringValue(row.updated_at),
     status: toStringValue(row.status) || "1",
     photoStatus,
     colorLabel: toStringValue(row.color_label) || "none",
@@ -104,5 +111,9 @@ export function mapRowToPhoto(row: Record<string, unknown>) {
     hasClientMarks: clientMarkCount > 0,
     clientMarkDetails,
     adminColorTags,
+    isPlaceholder: !thumbUrl && !displayUrl && !downloadUrl && Boolean(processingState),
+    processingState,
+    processingMessage: toStringValue(pendingUpload?.message) || undefined,
+    uploadSessionId: toStringValue(pendingUpload?.session_id) || undefined,
   };
 }

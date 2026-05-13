@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { Heart } from "lucide-react";
+import { AlertCircle, Heart, Loader2 } from "lucide-react";
 import type { Photo, Album, Project } from "@/data/mockData";
 import { colorLabelMap } from "@/data/mockData";
 import PhotoCard from "@/components/PhotoCard";
@@ -65,14 +65,17 @@ const PhotoGrid = ({
       <>
         <div className="flex flex-col gap-1">
           {photos.map((photo, i) => {
-            const listThumbSrc = (photo as Photo & { thumbUrl?: string }).thumbUrl || photo.url;
+            const listThumbSrc = ((photo as Photo & { thumbUrl?: string }).thumbUrl || photo.url || "").trim();
+            const isProcessingPlaceholder = Boolean(photo.processingState) && (!listThumbSrc || photo.isPlaceholder);
             return (
               <div
                 key={photo.id}
                 className={`flex items-center gap-3 rounded-lg border px-3 py-2 text-left transition-colors ${
                   isPhotoSelected(photo.id) ? "border-sky-400 bg-sky-50/50" : "border-border bg-card hover:bg-accent/50"
                 }`}
-                onClick={() => setPreviewIndex(i)}
+                onClick={() => {
+                  if (!isProcessingPlaceholder) setPreviewIndex(i);
+                }}
               >
                 {selectionActive && (
                   <button
@@ -89,7 +92,13 @@ const PhotoGrid = ({
                   </button>
                 )}
                 <div className="relative shrink-0">
-                  <img src={listThumbSrc} alt={photo.fileName} className="h-10 w-10 rounded object-cover" />
+                  {isProcessingPlaceholder ? (
+                    <div className="flex h-10 w-10 items-center justify-center rounded bg-muted text-muted-foreground">
+                      {photo.processingState === "failed" ? <AlertCircle className="h-4 w-4 text-destructive" /> : <Loader2 className="h-4 w-4 animate-spin text-primary" />}
+                    </div>
+                  ) : (
+                    <img src={listThumbSrc} alt={photo.fileName} className="h-10 w-10 rounded object-cover" />
+                  )}
                   {photo.clientMarked && (
                     <span className="absolute -right-1 -top-1 rounded-full bg-black/70 p-0.5 text-white shadow-sm">
                       <Heart className="h-2.5 w-2.5 fill-current text-rose-400" />
@@ -107,7 +116,7 @@ const PhotoGrid = ({
                       </div>
                     )}
                   </div>
-                  <p className="text-xs text-muted-foreground">{photo.tag}</p>
+                  <p className="text-xs text-muted-foreground">{photo.processingMessage || photo.tag}</p>
                 </div>
                 <p className="hidden text-xs text-muted-foreground sm:block">{photo.uploadedAt}</p>
               </div>

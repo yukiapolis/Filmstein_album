@@ -5,7 +5,7 @@ import { requireAdminApiAuth } from '@/lib/auth/session'
 import { getProjectPermissionContext } from '@/lib/auth/projectPermissions'
 import { supabase } from '@/lib/supabase/server'
 import { r2 } from '@/lib/r2/client'
-import { analyzeUploadMetadata, buildR2PublicUrl, buildUploadTempKey } from '@/lib/uploadDirect'
+import { analyzeUploadMetadata, buildR2PublicUrl, buildUploadTempKey, createPlaceholderPhoto } from '@/lib/uploadDirect'
 import type { UploadAnalysisResult } from '@/lib/uploadAnalysis'
 
 export async function POST(req: Request) {
@@ -61,6 +61,11 @@ export async function POST(req: Request) {
         ? 'retouch'
         : null
 
+    const shouldCreatePlaceholderPhoto = !uploadDecision
+      && normalizedAnalysis.classification !== 'duplicate_original'
+      && normalizedAnalysis.classification !== 'retouch_upload'
+      && !normalizedAnalysis.matchedPhotoId
+
     const { data: insertedSession, error: insertError } = await supabase
       .from('upload_sessions')
       .insert([{
@@ -89,6 +94,41 @@ export async function POST(req: Request) {
 
     if (insertError || !insertedSession) {
       return Response.json({ success: false, error: insertError?.message || 'Failed to create upload session' }, { status: 500 })
+    }
+
+    let targetPhotoId = uploadDecision === 'overwrite'
+      ? normalizedAnalysis.matchedPhotoId
+      : normalizedAnalysis.classification === 'retouch_upload'
+        ? normalizedAnalysis.matchedPhotoId
+        : null
+
+    if (shouldCreatePlaceholderPhoto) {
+      try {
+        targetPhotoId = await createPlaceholderPhoto({
+          projectId,
+          folderId,
+          fileName,
+          sessionId: insertedSession.id,
+        })
+      } catch (error) {
+        await supabase.from('upload_sessions').delete().eq('id', insertedSession.id)
+        return Response.json({ success: false, error: error instanceof Error ? error.message : 'Failed to create placeholder photo' }, { status: 500 })
+      }
+    }
+
+    if (targetPhotoId) {
+      const { error: bindTargetPhotoError } = await supabase
+        .from('upload_sessions')
+        .update({ target_photo_id: targetPhotoId })
+        .eq('id', insertedSession.id)
+
+      if (bindTargetPhotoError) {
+        if (shouldCreatePlaceholderPhoto) {
+          await supabase.from('photos').delete().eq('global_photo_id', targetPhotoId)
+        }
+        await supabase.from('upload_sessions').delete().eq('id', insertedSession.id)
+        return Response.json({ success: false, error: bindTargetPhotoError.message }, { status: 500 })
+      }
     }
 
     const objectKey = buildUploadTempKey({ projectId, sessionId: insertedSession.id, fileName })

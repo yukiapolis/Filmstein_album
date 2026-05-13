@@ -1,8 +1,9 @@
 "use client";
 
 import { type FormEvent, useMemo, useState } from "react";
-import { Aperture, Eye, EyeOff, Loader2 } from "lucide-react";
+import { Eye, EyeOff, Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
+import SnapflareLogo from "@/components/SnapflareLogo";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -65,15 +66,13 @@ export default function LoginForm({ nextPath }: { nextPath: string }) {
   return (
     <div className="flex min-h-screen items-center justify-center bg-surface px-4 py-10">
       <Card className="w-full max-w-md">
-        <CardHeader className="space-y-3">
-          <div className="flex items-center gap-3 text-primary">
-            <div className="flex h-11 w-11 items-center justify-center rounded-full bg-primary/10">
-              <Aperture className="h-5 w-5" />
-            </div>
-            <div>
-              <CardTitle className="text-xl">Snapflare Admin</CardTitle>
-              <CardDescription>{mode === "login" ? "Log in to access the dashboard." : "Create an admin account with an invite code."}</CardDescription>
-            </div>
+        <CardHeader className="space-y-4">
+          <div className="flex justify-center">
+            <SnapflareLogo />
+          </div>
+          <div className="text-center">
+            <CardTitle className="text-xl">Snapflare Admin</CardTitle>
+            <CardDescription>{mode === "login" ? "Log in to access the dashboard." : "Create an admin account with an invite code."}</CardDescription>
           </div>
         </CardHeader>
         <CardContent>

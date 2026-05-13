@@ -73,7 +73,7 @@ export async function GET(req: Request, context: RouteContext) {
 
     let photosQuery = supabase
       .from('photos')
-      .select('global_photo_id, project_id, folder_id, original_file_id, retouched_file_id, color_label, status, updated_at, is_published')
+      .select('global_photo_id, project_id, folder_id, original_file_id, retouched_file_id, color_label, status, metadata, updated_at, is_published')
       .eq('project_id', id)
 
     if (publishedOnly) {

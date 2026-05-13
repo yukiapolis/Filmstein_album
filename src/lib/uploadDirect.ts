@@ -60,8 +60,89 @@ export type UploadSessionRow = {
   warnings: string[] | null
 }
 
+type PendingUploadStatus = 'uploading' | 'uploaded' | 'processing' | 'failed'
+
+function buildPendingUploadMetadata(params: {
+  sessionId: string
+  fileName: string
+  status: PendingUploadStatus
+  message: string
+  createdAt?: string
+}) {
+  return {
+    pending_upload: {
+      session_id: params.sessionId,
+      file_name: params.fileName,
+      status: params.status,
+      message: params.message,
+      created_at: params.createdAt || new Date().toISOString(),
+    },
+  }
+}
+
 function buildGlobalPhotoId() {
   return `GP-${crypto.randomUUID().replace(/-/g, '').slice(0, 12).toUpperCase()}`
+}
+
+export async function createPlaceholderPhoto(params: {
+  projectId: string
+  folderId?: string | null
+  fileName: string
+  sessionId: string
+}) {
+  const photoId = buildGlobalPhotoId()
+  const now = new Date().toISOString()
+  const { error } = await supabase.from('photos').insert([{
+    global_photo_id: photoId,
+    project_id: params.projectId,
+    folder_id: params.folderId || null,
+    star_rating: 0,
+    status: 1,
+    is_published: false,
+    metadata: buildPendingUploadMetadata({
+      sessionId: params.sessionId,
+      fileName: params.fileName,
+      status: 'uploading',
+      message: 'Upload in progress…',
+      createdAt: now,
+    }),
+    updated_at: now,
+  }])
+
+  if (error) throw error
+  return photoId
+}
+
+export async function setPhotoPendingUploadState(params: {
+  photoId: string
+  sessionId: string
+  fileName: string
+  status: PendingUploadStatus
+  message: string
+}) {
+  const { error } = await supabase
+    .from('photos')
+    .update({
+      metadata: buildPendingUploadMetadata({
+        sessionId: params.sessionId,
+        fileName: params.fileName,
+        status: params.status,
+        message: params.message,
+      }),
+      updated_at: new Date().toISOString(),
+    })
+    .eq('global_photo_id', params.photoId)
+
+  if (error) throw error
+}
+
+export async function clearPhotoPendingUploadState(photoId: string) {
+  const { error } = await supabase
+    .from('photos')
+    .update({ metadata: {}, updated_at: new Date().toISOString() })
+    .eq('global_photo_id', photoId)
+
+  if (error) throw error
 }
 
 export function sanitizeFileName(name: string) {
@@ -498,6 +579,21 @@ export async function processDirectUploadSession(sessionId: string, options?: { 
   if (!session) throw new Error('Upload session is not ready for processing')
   if (!session.source_bucket_name || !session.source_object_key) throw new Error('Upload source is missing')
 
+  const shouldUsePlaceholderState = Boolean(session.target_photo_id)
+    && session.upload_decision !== 'overwrite'
+    && session.classification !== 'retouch_upload'
+    && !session.matched_photo_id
+
+  if (shouldUsePlaceholderState && session.target_photo_id) {
+    await setPhotoPendingUploadState({
+      photoId: session.target_photo_id,
+      sessionId,
+      fileName: session.file_name,
+      status: 'processing',
+      message: 'Generating previews…',
+    }).catch(() => undefined)
+  }
+
   let createdNewPhoto = false
   let targetPhotoId = session.target_photo_id?.trim() || null
   let targetProjectId = session.project_id
@@ -574,6 +670,16 @@ export async function processDirectUploadSession(sessionId: string, options?: { 
 
       if (photoError) return rollback(photoError.message)
       createdNewPhoto = true
+    }
+
+    if (shouldUsePlaceholderState && targetPhotoId) {
+      await setPhotoPendingUploadState({
+        photoId: targetPhotoId,
+        sessionId,
+        fileName: session.file_name,
+        status: 'processing',
+        message: 'Generating previews…',
+      }).catch(() => undefined)
     }
 
     const uploadKind = detectUploadKindByName(session.file_name)
@@ -813,6 +919,9 @@ export async function processDirectUploadSession(sessionId: string, options?: { 
 
     if (updateError) return rollback(updateError.message)
 
+    if (shouldUsePlaceholderState) {
+      await clearPhotoPendingUploadState(targetPhotoId).catch(() => undefined)
+    }
     await deleteStoredAsset({ storage_provider: 'r2', bucket_name: session.source_bucket_name, object_key: session.source_object_key }).catch(() => undefined)
 
     await setUploadSessionStatus(sessionId, {
@@ -843,6 +952,15 @@ export async function processDirectUploadSession(sessionId: string, options?: { 
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Server error'
+    if (shouldUsePlaceholderState && session.target_photo_id) {
+      await setPhotoPendingUploadState({
+        photoId: session.target_photo_id,
+        sessionId,
+        fileName: session.file_name,
+        status: 'failed',
+        message: message || 'Processing failed',
+      }).catch(() => undefined)
+    }
     await setUploadSessionStatus(sessionId, { status: 'failed', processing_error: message, warnings }).catch(() => undefined)
     throw error
   }
