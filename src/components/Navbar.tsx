@@ -86,12 +86,7 @@ const Navbar = ({ breadcrumb, actions }: { breadcrumb?: ReactNode; actions?: Rea
       <div className="container grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-4 py-3 sm:flex sm:h-16 sm:items-center sm:justify-between sm:py-0">
         <div className="min-w-0 flex items-center gap-3 sm:gap-4 sm:flex-1">
           <Link href="/" className="flex shrink-0 items-center">
-            <SnapflareLogo
-              compact
-              wordmarkClassName="text-[1.15rem]"
-              subtitleClassName="text-[0.62rem] text-muted-foreground"
-              markClassName="h-7 w-[3.3rem]"
-            />
+            <SnapflareLogo compact markClassName="w-[8.75rem]" />
           </Link>
           {breadcrumb && <div className="min-w-0 flex-1">{breadcrumb}</div>}
         </div>
