@@ -17,11 +17,11 @@ export const metadata: Metadata = {
   description: "Photo project dashboard",
   icons: {
     icon: [
-      { url: "/icon", type: "image/png", sizes: "64x64" },
+      { url: "/branding/snapflare-mark.svg", type: "image/svg+xml", sizes: "any" },
       { url: "/favicon.ico" },
     ],
-    shortcut: ["/icon"],
-    apple: [{ url: "/apple-icon", sizes: "180x180", type: "image/png" }],
+    shortcut: ["/branding/snapflare-mark.svg"],
+    apple: [{ url: "/branding/snapflare-mark.svg", sizes: "180x180", type: "image/svg+xml" }],
   },
 };
 
