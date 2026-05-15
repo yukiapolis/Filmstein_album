@@ -1,8 +1,18 @@
+import { headers } from 'next/headers'
+
 import { requireAdminApiAuth } from '@/lib/auth/session'
 import { getProjectPermissionContext } from '@/lib/auth/projectPermissions'
 import { cancelActiveStorageOperation, createPullToCurrentNodeOperation, createReturnToR2Operation, getStorageOperationPanel, kickProjectStorageOperation } from '@/lib/storageOperations'
 
 type RouteContext = { params: Promise<{ id: string }> }
+
+async function getRequestOrigin(req: Request) {
+  const headerStore = await headers()
+  const forwardedProto = headerStore.get('x-forwarded-proto')?.split(',')[0]?.trim()
+  const forwardedHost = headerStore.get('x-forwarded-host')?.split(',')[0]?.trim() || headerStore.get('host')?.trim()
+  if (forwardedProto && forwardedHost) return `${forwardedProto}://${forwardedHost}`
+  return new URL(req.url).origin
+}
 
 export async function GET(req: Request, context: RouteContext) {
   const auth = await requireAdminApiAuth()
@@ -15,7 +25,7 @@ export async function GET(req: Request, context: RouteContext) {
     if (!permission.exists) return Response.json({ success: false, error: 'Not found' }, { status: 404 })
     if (!permission.isSuperAdmin) return Response.json({ success: false, error: 'Forbidden' }, { status: 403 })
 
-    const data = await getStorageOperationPanel(projectId, new URL(req.url).origin)
+    const data = await getStorageOperationPanel(projectId, await getRequestOrigin(req))
     return Response.json({ success: true, data: { activeMigration: data.activeOperation, migrations: data.operations, currentNode: data.currentNode, projectStorageState: data.projectStorageState, permissions: data.permissions } })
   } catch (error) {
     return Response.json({ success: false, error: error instanceof Error ? error.message : 'Server error' }, { status: 500 })
@@ -43,13 +53,13 @@ export async function POST(req: Request, context: RouteContext) {
       return Response.json({ success: false, error: 'Select at least one branch type' }, { status: 400 })
     }
 
-    const origin = new URL(req.url).origin
+    const origin = await getRequestOrigin(req)
     const result = operationType === 'return_to_r2'
       ? await createReturnToR2Operation({ projectId, requestedByAdminUserId: auth.id, branchTypes, requestOrigin: origin })
       : await createPullToCurrentNodeOperation({ projectId, requestedByAdminUserId: auth.id, branchTypes, requestOrigin: origin })
 
     if (result.operation?.id) {
-      void kickProjectStorageOperation(origin, result.operation.id)
+      void kickProjectStorageOperation(result.context.currentNode.publicBaseUrl || origin, result.operation.id)
     }
 
     const data = await getStorageOperationPanel(projectId, origin)
@@ -78,8 +88,9 @@ export async function DELETE(req: Request, context: RouteContext) {
     if (!permission.exists) return Response.json({ success: false, error: 'Not found' }, { status: 404 })
     if (!permission.isSuperAdmin) return Response.json({ success: false, error: 'Forbidden' }, { status: 403 })
 
-    const result = await cancelActiveStorageOperation({ projectId, requestOrigin: new URL(req.url).origin })
-    const data = await getStorageOperationPanel(projectId, new URL(req.url).origin)
+    const origin = await getRequestOrigin(req)
+    const result = await cancelActiveStorageOperation({ projectId, requestOrigin: origin })
+    const data = await getStorageOperationPanel(projectId, origin)
     return Response.json({ success: true, data: { activeMigration: data.activeOperation, migrations: data.operations, currentNode: data.currentNode, projectStorageState: data.projectStorageState, permissions: data.permissions, cancelledOperationId: result.cancelledOperationId } })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Server error'
