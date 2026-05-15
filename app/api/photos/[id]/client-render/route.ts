@@ -208,9 +208,36 @@ function orderReadableCopies(copies: PhotoFileCopyRow[]): PhotoFileCopyRow[] {
   })
 }
 
+function trimTrailingSlash(value: string) {
+  return value.replace(/\/+$/, '')
+}
+
+function buildHolderProxyRenderUrl(input: {
+  holderPublicBaseUrl: string | null
+  currentRequestOrigin: string
+  photoId: string
+  mode: 'preview' | 'download'
+}) {
+  if (!input.holderPublicBaseUrl) return null
+  const holderBase = trimTrailingSlash(input.holderPublicBaseUrl)
+  const currentOrigin = trimTrailingSlash(input.currentRequestOrigin)
+  if (!holderBase || holderBase === currentOrigin) return null
+  return `${holderBase}/api/photos/${input.photoId}/client-render?mode=${input.mode}&disposition=inline`
+}
+
+async function readFromHolderProxy(url: string) {
+  const readStartedAt = Date.now()
+  const res = await fetch(url)
+  if (!res.ok) return { buffer: null as Buffer | null, sourceReadMs: Date.now() - readStartedAt }
+  return { buffer: Buffer.from(await res.arrayBuffer()), sourceReadMs: Date.now() - readStartedAt }
+}
+
 async function loadPreferredImageSource(params: {
   mode: 'preview' | 'download'
+  photoId: string
   latestVersion: ReturnType<typeof getLatestVersionFiles>
+  currentRequestOrigin: string
+  holderPublicBaseUrl: string | null
 }) {
   const selectionStartedAt = Date.now()
   if (!params.latestVersion) {
@@ -235,6 +262,13 @@ async function loadPreferredImageSource(params: {
         const buffer = await fs.readFile(selectedDisplayCopy.storage_key)
         return { buffer, sourceKey: selectedDisplayCopy.storage_key, sourceType: 'display-local' as const, fallbackMessage: null, timing: { sourceSelectMs, sourceReadMs: Date.now() - readStartedAt }, debug: { hasOriginalBranch: Boolean(params.latestVersion.byBranch.original), originalCopyCount: 0, selectedOriginalCopy: null, originalReadFailure: null } }
       } catch {
+        const holderProxyUrl = buildHolderProxyRenderUrl({ holderPublicBaseUrl: params.holderPublicBaseUrl, currentRequestOrigin: params.currentRequestOrigin, photoId: params.photoId, mode: 'preview' })
+        if (holderProxyUrl) {
+          const proxied = await readFromHolderProxy(holderProxyUrl)
+          if (proxied.buffer) {
+            return { buffer: proxied.buffer, sourceKey: holderProxyUrl, sourceType: 'display-holder-proxy' as const, fallbackMessage: null, timing: { sourceSelectMs, sourceReadMs: proxied.sourceReadMs }, debug: { hasOriginalBranch: Boolean(params.latestVersion.byBranch.original), originalCopyCount: 0, selectedOriginalCopy: null, originalReadFailure: null } }
+          }
+        }
         // continue to URL fallback
       }
     }
@@ -272,6 +306,13 @@ async function loadPreferredImageSource(params: {
         const buffer = await fs.readFile(candidateCopy.storage_key)
         return { buffer, sourceKey: candidateCopy.storage_key, sourceType: 'local-original' as const, fallbackMessage: null, timing: { sourceSelectMs: msSince(selectionStartedAt), sourceReadMs: msSince(readStartedAt) }, debug: { hasOriginalBranch: Boolean(originalFile), originalCopyCount: originalCopies.length, selectedOriginalCopy: attemptedOriginalCopyDebug, originalReadFailure: null } }
       } catch (error) {
+        const holderProxyUrl = buildHolderProxyRenderUrl({ holderPublicBaseUrl: params.holderPublicBaseUrl, currentRequestOrigin: params.currentRequestOrigin, photoId: params.photoId, mode: 'download' })
+        if (holderProxyUrl) {
+          const proxied = await readFromHolderProxy(holderProxyUrl)
+          if (proxied.buffer) {
+            return { buffer: proxied.buffer, sourceKey: holderProxyUrl, sourceType: 'holder-proxy-original' as const, fallbackMessage: null, timing: { sourceSelectMs: msSince(selectionStartedAt), sourceReadMs: proxied.sourceReadMs }, debug: { hasOriginalBranch: Boolean(originalFile), originalCopyCount: originalCopies.length, selectedOriginalCopy: attemptedOriginalCopyDebug, originalReadFailure: null } }
+          }
+        }
         originalReadFailure = error instanceof Error ? error.message : String(error)
         rememberOriginalCopyFailure(candidateCopy, originalReadFailure)
         console.warn('[client-render] original local copy read failed, trying next copy', {
@@ -339,6 +380,20 @@ async function loadPreferredImageSource(params: {
           debug: { hasOriginalBranch: Boolean(originalFile), originalCopyCount: originalCopies.length, selectedOriginalCopy: originalCopyDebug, originalReadFailure },
         }
       } catch {
+        const holderProxyUrl = buildHolderProxyRenderUrl({ holderPublicBaseUrl: params.holderPublicBaseUrl, currentRequestOrigin: params.currentRequestOrigin, photoId: params.photoId, mode: 'preview' })
+        if (holderProxyUrl) {
+          const proxied = await readFromHolderProxy(holderProxyUrl)
+          if (proxied.buffer) {
+            return {
+              buffer: proxied.buffer,
+              sourceKey: holderProxyUrl,
+              sourceType: 'display-holder-proxy' as const,
+              fallbackMessage: 'High-resolution original unavailable, using highest available display version',
+              timing: { sourceSelectMs, sourceReadMs: proxied.sourceReadMs },
+              debug: { hasOriginalBranch: Boolean(originalFile), originalCopyCount: originalCopies.length, selectedOriginalCopy: originalCopyDebug, originalReadFailure },
+            }
+          }
+        }
         // continue to url fallback
       }
     }
@@ -388,6 +443,22 @@ async function buildClientImage(request: NextRequest, context: RouteContext, hea
 
     if (projectError) return Response.json({ error: projectError.message }, { status: 500 })
 
+    const { data: storageStateRow } = await supabase
+      .from('project_storage_state')
+      .select('location_mode, holder_node_id')
+      .eq('project_id', photoRow.project_id)
+      .maybeSingle()
+
+    let holderPublicBaseUrl: string | null = null
+    if (storageStateRow?.location_mode === 'node_local' && typeof storageStateRow.holder_node_id === 'string' && storageStateRow.holder_node_id) {
+      const { data: holderNodeRow } = await supabase
+        .from('storage_nodes')
+        .select('public_base_url')
+        .eq('id', storageStateRow.holder_node_id)
+        .maybeSingle()
+      holderPublicBaseUrl = typeof holderNodeRow?.public_base_url === 'string' ? holderNodeRow.public_base_url.replace(/\/+$/, '') : null
+    }
+
     const visualSettings = asRecord(projectRow?.visual_settings)
     const projectAssets = asRecord(projectRow?.project_assets)
     const watermark = asRecord(visualSettings?.watermark) ?? {}
@@ -411,7 +482,7 @@ async function buildClientImage(request: NextRequest, context: RouteContext, hea
     const latestVersion = getLatestVersionFiles((fileRows ?? []) as PhotoFileRow[])
     if (!latestVersion) return Response.json({ error: 'No file found' }, { status: 404 })
 
-    const source = await loadPreferredImageSource({ mode, latestVersion })
+    const source = await loadPreferredImageSource({ mode, photoId: id, latestVersion, currentRequestOrigin: resolvePublicRequestOrigin(request), holderPublicBaseUrl })
     const debugSourceMeta = Buffer.from(JSON.stringify(source.debug ?? {})).toString('base64url')
     if (!source.buffer) {
       return Response.json({ error: source.fallbackMessage || 'Image source unavailable' }, { status: 404, headers: {
