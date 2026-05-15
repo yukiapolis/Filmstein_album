@@ -1,4 +1,5 @@
 const R2_DEFAULT_ORIGIN = "https://photo.filmstein.com";
+const BACKUP_REMOTE_DEFAULT_ORIGIN = "https://snapflarebackup.filmstein.com";
 
 function trimTrailingSlash(s: string): string {
   return s.replace(/\/+$/, "");
@@ -49,7 +50,10 @@ function extractPathFromSupabaseStorageUrl(urlString: string): string | null {
  * Build <img src>. Do not return Supabase Storage URLs; use R2 public origin + object path.
  */
 export function resolvePhotoPublicUrl(row: Record<string, unknown>): string {
-  const base = getPhotoPublicBase();
+  const provider = typeof row.storage_provider === "string" ? row.storage_provider.trim().toLowerCase() : "";
+  const base = provider === "backup_remote"
+    ? (process.env.BACKUP_REMOTE_PUBLIC_BASE_URL || BACKUP_REMOTE_DEFAULT_ORIGIN).replace(/\/+$/, "")
+    : getPhotoPublicBase();
 
   const keyFields = [
     row.key,

@@ -1,7 +1,15 @@
 import type { Project } from "@/data/mockData";
 import ProjectListRow from "@/components/ProjectListRow";
 
-const ProjectGrid = ({ projects }: { projects: Project[] }) => {
+const ProjectGrid = ({
+  projects,
+  isSuperAdmin = false,
+  onOpenMigration,
+}: {
+  projects: Project[]
+  isSuperAdmin?: boolean
+  onOpenMigration?: (project: Project) => void
+}) => {
   if (projects.length === 0) {
     return (
       <div className="rounded-xl border border-dashed border-border bg-card px-6 py-12 text-center">
@@ -14,7 +22,12 @@ const ProjectGrid = ({ projects }: { projects: Project[] }) => {
   return (
     <div className="space-y-3">
       {projects.map((project) => (
-        <ProjectListRow key={project.id} project={project} />
+        <ProjectListRow
+          key={project.id}
+          project={project}
+          isSuperAdmin={isSuperAdmin}
+          onOpenMigration={onOpenMigration}
+        />
       ))}
     </div>
   );

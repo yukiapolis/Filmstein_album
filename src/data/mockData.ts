@@ -12,6 +12,12 @@ export interface Project {
     canDelete?: boolean;
     canManageAssignments?: boolean;
   };
+  storage_state?: {
+    location_mode?: 'r2' | 'node_local';
+    holder_node_id?: string | null;
+    holder_node_name?: string | null;
+    holder_node_key?: string | null;
+  };
   type: ProjectType;
   date: string;
   created_at?: string;
