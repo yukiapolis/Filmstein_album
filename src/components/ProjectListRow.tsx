@@ -27,11 +27,34 @@ function formatCreatedAt(project: Project) {
   }).format(date)
 }
 
-export default function ProjectListRow({ project }: { project: Project }) {
+function getStorageBadge(project: Project) {
+  const mode = project.storage_state?.location_mode === 'node_local' ? 'node_local' : 'r2'
+  if (mode === 'node_local') {
+    return {
+      label: project.storage_state?.holder_node_name || project.storage_state?.holder_node_key || 'Node local',
+      className: 'bg-amber-50 text-amber-700 border border-amber-200',
+    }
+  }
+  return {
+    label: 'R2',
+    className: 'bg-sky-50 text-sky-700 border border-sky-200',
+  }
+}
+
+export default function ProjectListRow({
+  project,
+  isSuperAdmin = false,
+  onOpenMigration,
+}: {
+  project: Project
+  isSuperAdmin?: boolean
+  onOpenMigration?: (project: Project) => void
+}) {
   const ftpEnabled = Boolean(project.ftp_ingest?.enabled)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [dangerConfirmOpen, setDangerConfirmOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const storageBadge = getStorageBadge(project)
 
   const handleDelete = async () => {
     setDeleting(true)
@@ -84,6 +107,9 @@ export default function ProjectListRow({ project }: { project: Project }) {
             </div>
 
             <div className="rounded-lg bg-muted/40 px-3 py-2 text-sm font-medium text-foreground inline-flex items-center gap-1.5">
+              <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${storageBadge.className}`}>
+                {storageBadge.label}
+              </span>
               <HardDrive className="h-3.5 w-3.5" />
               {formatStorage(project.storage_used_bytes)}
             </div>
@@ -93,7 +119,12 @@ export default function ProjectListRow({ project }: { project: Project }) {
             </div>
           </div>
 
-          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-end lg:min-w-[220px] lg:flex-none">
+          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-end lg:min-w-[320px] lg:flex-none">
+            {isSuperAdmin ? (
+              <Button type="button" variant="outline" size="sm" className="w-full sm:w-auto" onClick={() => onOpenMigration?.(project)}>
+                Migration
+              </Button>
+            ) : null}
             <Button type="button" variant="outline" size="sm" className="w-full sm:w-auto" asChild>
               <Link href={`/projects/${project.id}/preview`}>View</Link>
             </Button>

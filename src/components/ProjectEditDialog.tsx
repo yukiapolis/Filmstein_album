@@ -6,6 +6,10 @@ import type { Project, ProjectType, ProjectStatus } from "@/data/mockData";
 import { Button } from "@/components/ui/button";
 import { buildProjectAssetApiUrl, type ProjectAssetKey } from '@/lib/projectAssetUrl'
 import { clampWatermarkOpacity, clampWatermarkScale, getClientWatermarkConfig, getWatermarkStyle } from '@/lib/clientWatermark'
+import type { ProjectStorageSummary, StorageBranchSummary } from '@/lib/storageManagement'
+import type { StorageMigrationBranchType } from '@/lib/storageMigrations'
+import type { CurrentStorageNodeInfo, ProjectStoragePermissions, ProjectStorageStateInfo } from '@/lib/currentStorageNode'
+import type { ProjectStorageOperationRow } from '@/lib/storageOperations'
 
 interface ProjectEditDialogProps {
   open: boolean;
@@ -30,6 +34,15 @@ interface AssignmentPermissions {
   isAssigned: boolean;
   isSuperAdmin: boolean;
   ownerAdminUserId: string | null;
+}
+
+type StorageMigrationStatusPayload = {
+  activeMigration: ProjectStorageOperationRow | null
+  migrations: ProjectStorageOperationRow[]
+  currentNode: CurrentStorageNodeInfo
+  projectStorageState: ProjectStorageStateInfo | null
+  permissions: ProjectStoragePermissions
+  createdOperation?: ProjectStorageOperationRow | null
 }
 
 type AssetKey = 'cover' | 'banner' | 'splash_poster' | 'loading_gif' | 'watermark_logo'
@@ -57,10 +70,50 @@ const ASSET_SPECS: Record<AssetKey, { label: string; recommendedSize?: string; m
   watermark_logo: { label: 'Watermark Logo', maxMb: 5 },
 }
 
+const STORAGE_LOCATION_LABELS = {
+  r2: 'R2',
+  local_backup_server: 'Node local',
+  other_remote_storage: 'Other remote storage',
+  app_local_storage: 'App local storage',
+} as const
+
+const STORAGE_BRANCH_LABELS: Record<'thumb' | 'display' | 'original', string> = {
+  thumb: 'thumb',
+  display: 'display',
+  original: 'original',
+}
+
+
 function formatBytesToMb(bytes: number) {
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`
 }
 
+function formatBytes(value: number) {
+  if (!Number.isFinite(value) || value <= 0) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  let size = value
+  let unitIndex = 0
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024
+    unitIndex += 1
+  }
+  return `${size.toFixed(size >= 100 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`
+}
+
+function formatEta(seconds?: number | null) {
+  if (!seconds || seconds <= 0) return '—'
+  const hours = Math.floor(seconds / 3600)
+  const minutes = Math.floor((seconds % 3600) / 60)
+  const secs = Math.floor(seconds % 60)
+  if (hours > 0) return `${hours}h ${minutes}m`
+  if (minutes > 0) return `${minutes}m ${secs}s`
+  return `${secs}s`
+}
+
+function formatNodeModeLabel(locationMode?: 'r2' | 'node_local' | null) {
+  if (locationMode === 'node_local') return 'Held by node'
+  return 'R2'
+}
 
 function AssetPreview({ asset, label, previewUrl }: { asset?: AssetValue; label: string; previewUrl?: string }) {
   if (!asset?.url && !previewUrl) {
@@ -209,6 +262,14 @@ export default function ProjectEditDialog({
   const [cleaningOrphans, setCleaningOrphans] = useState(false);
   const [orphanCleanupSummary, setOrphanCleanupSummary] = useState<string | null>(null);
   const [cleanupConfirmOpen, setCleanupConfirmOpen] = useState(false);
+  const [storageSummary, setStorageSummary] = useState<ProjectStorageSummary | null>(null)
+  const [storageSummaryLoading, setStorageSummaryLoading] = useState(false)
+  const [storageSummaryError, setStorageSummaryError] = useState<string | null>(null)
+  const [storageMigrationStatus, setStorageMigrationStatus] = useState<StorageMigrationStatusPayload | null>(null)
+  const [storageMigrationLoading, setStorageMigrationLoading] = useState(false)
+  const [storageMigrationError, setStorageMigrationError] = useState<string | null>(null)
+  const [storageMigrationSubmitting, setStorageMigrationSubmitting] = useState(false)
+  const [storageMigrationSelection, setStorageMigrationSelection] = useState<Record<StorageMigrationBranchType, boolean>>({ thumb: false, display: false, original: false })
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [assignments, setAssignments] = useState<ProjectAssignmentItem[]>([]);
@@ -364,6 +425,74 @@ export default function ProjectEditDialog({
       cancelled = true
     }
   }, [open, project.id])
+
+  useEffect(() => {
+    if (!open || assignmentPermissions?.isSuperAdmin !== true) {
+      if (!open) {
+        setStorageSummary(null)
+        setStorageSummaryError(null)
+        setStorageMigrationStatus(null)
+        setStorageMigrationError(null)
+      }
+      return
+    }
+
+    let cancelled = false
+
+    const loadStoragePanel = async (isInitial: boolean) => {
+      if (isInitial) {
+        setStorageSummaryLoading(true)
+        setStorageMigrationLoading(true)
+      }
+      setStorageSummaryError(null)
+      setStorageMigrationError(null)
+      try {
+        const [summaryRes, migrationRes] = await Promise.all([
+          fetch(`/api/projects/${project.id}/storage/summary`),
+          fetch(`/api/projects/${project.id}/storage/migrations`),
+        ])
+        const summaryBody = await summaryRes.json().catch(() => null) as { success?: boolean; error?: string; data?: ProjectStorageSummary } | null
+        const migrationBody = await migrationRes.json().catch(() => null) as { success?: boolean; error?: string; data?: StorageMigrationStatusPayload } | null
+        if (cancelled) return
+
+        if (!summaryRes.ok || summaryBody?.success !== true || !summaryBody.data) {
+          setStorageSummaryError(summaryBody?.error ?? 'Could not load storage summary')
+          setStorageSummary(null)
+        } else {
+          setStorageSummary(summaryBody.data)
+        }
+
+        if (!migrationRes.ok || migrationBody?.success !== true || !migrationBody.data) {
+          setStorageMigrationError(migrationBody?.error ?? 'Could not load storage migrations')
+          setStorageMigrationStatus(null)
+        } else {
+          setStorageMigrationStatus(migrationBody.data)
+        }
+      } catch {
+        if (!cancelled) {
+          setStorageSummaryError('Could not load storage summary')
+          setStorageMigrationError('Could not load storage migrations')
+          setStorageSummary(null)
+          setStorageMigrationStatus(null)
+        }
+      } finally {
+        if (!cancelled && isInitial) {
+          setStorageSummaryLoading(false)
+          setStorageMigrationLoading(false)
+        }
+      }
+    }
+
+    void loadStoragePanel(true)
+    const poll = window.setInterval(() => {
+      void loadStoragePanel(false)
+    }, 3000)
+
+    return () => {
+      cancelled = true
+      window.clearInterval(poll)
+    }
+  }, [open, project.id, assignmentPermissions?.isSuperAdmin])
 
   useEffect(() => {
     const previewUrl = buildProjectAssetApiUrl(project.id, 'watermark_logo', projectAssets.watermark_logo?.version_token || projectAssets.watermark_logo?.file_name || projectAssets.watermark_logo?.file_size_bytes || '1')
@@ -533,6 +662,160 @@ export default function ProjectEditDialog({
       setAssignmentsSaving(false);
     }
   };
+
+  const renderLocationBreakdown = (counts: Record<'r2' | 'local_backup_server' | 'other_remote_storage' | 'app_local_storage', number>) => {
+    const visibleEntries = Object.entries(counts).filter(([, value]) => value > 0) as Array<[keyof typeof counts, number]>
+    if (visibleEntries.length === 0) {
+      return <p className="text-xs text-muted-foreground">None detected</p>
+    }
+
+    return (
+      <div className="flex flex-wrap gap-2">
+        {visibleEntries.map(([key, value]) => (
+          <span key={key} className="rounded-full border border-border bg-background px-2 py-1 text-[11px] text-foreground">
+            {STORAGE_LOCATION_LABELS[key]} · {value}
+          </span>
+        ))}
+      </div>
+    )
+  }
+
+  const handleToggleStorageMigrationBranch = (branchType: StorageMigrationBranchType) => {
+    setStorageMigrationSelection((current) => ({ ...current, [branchType]: !current[branchType] }))
+  }
+
+  const handleStartStorageMigration = async () => {
+    const branchTypes = (Object.entries(storageMigrationSelection) as Array<[StorageMigrationBranchType, boolean]>)
+      .filter(([, checked]) => checked)
+      .map(([branchType]) => branchType)
+
+    if (branchTypes.length === 0) return
+
+    setStorageMigrationSubmitting(true)
+    setStorageMigrationError(null)
+    try {
+      const res = await fetch(`/api/projects/${project.id}/storage/migrations`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ branchTypes }),
+      })
+      const body = await res.json().catch(() => null) as { success?: boolean; error?: string; data?: StorageMigrationStatusPayload } | null
+      if (!res.ok || body?.success !== true || !body.data) {
+        setStorageMigrationError(body?.error ?? 'Could not start pull-to-current-node')
+        return
+      }
+      setStorageMigrationStatus(body.data)
+      setStorageMigrationSelection({ thumb: false, display: false, original: false })
+    } catch {
+      setStorageMigrationError('Could not start pull-to-current-node')
+    } finally {
+      setStorageMigrationSubmitting(false)
+    }
+  }
+
+  const renderStorageBranchCard = (branch: StorageBranchSummary) => (
+    <div key={branch.branchType} className="rounded-md border border-border bg-background p-4 space-y-3">
+      <div>
+        <p className="text-sm font-semibold text-foreground capitalize">{STORAGE_BRANCH_LABELS[branch.branchType]}</p>
+        <p className="text-xs text-muted-foreground">{branch.totalFiles} files in this project</p>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="space-y-2">
+          <p className="text-xs font-medium text-foreground">Primary read source</p>
+          {renderLocationBreakdown(branch.primaryReadSource)}
+        </div>
+        <div className="space-y-2">
+          <p className="text-xs font-medium text-foreground">Copy distribution</p>
+          {renderLocationBreakdown(branch.copyDistribution.byLocation)}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
+        <div className="rounded border border-border/70 px-2 py-2">
+          <p className="text-muted-foreground">Readable</p>
+          <p className="mt-1 font-medium text-foreground">{branch.readableFiles}</p>
+        </div>
+        <div className="rounded border border-border/70 px-2 py-2">
+          <p className="text-muted-foreground">Verified</p>
+          <p className="mt-1 font-medium text-foreground">{branch.verifiedFiles}</p>
+        </div>
+        <div className="rounded border border-border/70 px-2 py-2">
+          <p className="text-muted-foreground">Failed / abnormal</p>
+          <p className="mt-1 font-medium text-foreground">{branch.failedFiles} / {branch.abnormalFiles}</p>
+        </div>
+        <div className="rounded border border-border/70 px-2 py-2">
+          <p className="text-muted-foreground">No primary / no readable</p>
+          <p className="mt-1 font-medium text-foreground">{branch.noPrimaryFiles} / {branch.noReadableFiles}</p>
+        </div>
+      </div>
+
+      <div className="rounded border border-border/70 px-3 py-3 text-xs text-muted-foreground">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+          <span>Total copies: {branch.copyDistribution.totalCopies}</span>
+          <span>Available: {branch.copyDistribution.availableCopies}</span>
+          <span>Queued: {branch.copyDistribution.queuedCopies}</span>
+          <span>Copying: {branch.copyDistribution.copyingCopies}</span>
+          <span>Verifying: {branch.copyDistribution.verifyingCopies}</span>
+        </div>
+      </div>
+    </div>
+  )
+
+  const selectedStorageMigrationBranchCount = Object.values(storageMigrationSelection).filter(Boolean).length
+  const activeStorageMigration = storageMigrationStatus?.activeMigration ?? null
+  const currentStorageNode = storageMigrationStatus?.currentNode ?? null
+  const projectStorageState = storageMigrationStatus?.projectStorageState ?? null
+  const storagePermissions = storageMigrationStatus?.permissions ?? null
+
+  const renderStorageMigrationCard = (operation: ProjectStorageOperationRow, compact = false) => {
+    const progress = operation.total_files > 0 ? Math.min(100, Math.round((operation.done_files / operation.total_files) * 100)) : 0
+
+    return (
+      <div key={operation.id} className={`rounded-md border border-border bg-background p-4 ${compact ? 'space-y-2' : 'space-y-3'}`}>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="text-sm font-semibold text-foreground">Pull to current node</p>
+            <p className="text-[11px] text-muted-foreground">{operation.requested_branch_types.join(', ')} · {operation.status}{operation.current_phase ? ` · phase ${operation.current_phase}` : ''}</p>
+          </div>
+          <p className="text-[11px] text-muted-foreground">{operation.created_at ? new Date(operation.created_at).toLocaleString() : ''}</p>
+        </div>
+
+        <div className="space-y-1">
+          <div className="flex items-center justify-between text-xs text-muted-foreground">
+            <span>Progress</span>
+            <span>{operation.done_files} / {operation.total_files} files</span>
+          </div>
+          <div className="h-2 overflow-hidden rounded-full bg-muted">
+            <div className="h-full bg-foreground/80 transition-all" style={{ width: `${progress}%` }} />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
+          <div className="rounded border border-border/70 px-2 py-2">
+            <p className="text-muted-foreground">Failed files</p>
+            <p className="mt-1 font-medium text-foreground">{operation.failed_files}</p>
+          </div>
+          <div className="rounded border border-border/70 px-2 py-2">
+            <p className="text-muted-foreground">Transferred</p>
+            <p className="mt-1 font-medium text-foreground">{formatBytes(operation.transferred_bytes)} / {formatBytes(operation.total_bytes)}</p>
+          </div>
+          <div className="rounded border border-border/70 px-2 py-2">
+            <p className="text-muted-foreground">Node</p>
+            <p className="mt-1 font-medium text-foreground">{operation.node_name || operation.node_key || '—'}</p>
+          </div>
+          <div className="rounded border border-border/70 px-2 py-2">
+            <p className="text-muted-foreground">State switch</p>
+            <p className="mt-1 font-medium text-foreground">{projectStorageState?.transitionState || 'idle'}</p>
+          </div>
+        </div>
+
+        {operation.error_message ? (
+          <p className="text-xs text-destructive">Last error: {operation.error_message}</p>
+        ) : null}
+      </div>
+    )
+  }
 
   const handleSave = async () => {
     setSaving(true);

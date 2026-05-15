@@ -30,7 +30,8 @@ function fallbackPriority(copy: PhotoFileCopyRow): number {
   const providerPriority = (() => {
     switch (copy.storage_provider) {
       case 'local': return 2
-      case 'r2': return 1
+      case 'r2': return 2
+      case 'backup_remote': return 1
       default: return 0
     }
   })()

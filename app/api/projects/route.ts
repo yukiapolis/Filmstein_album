@@ -37,6 +37,44 @@ export async function GET() {
       )
     }
 
+    const projectIds = (data ?? []).map((row) => String(row.id ?? '')).filter(Boolean)
+
+    let storageStateByProjectId = new Map<string, { location_mode?: 'r2' | 'node_local'; holder_node_id?: string | null; holder_node_name?: string | null; holder_node_key?: string | null }>()
+    if (projectIds.length > 0) {
+      const { data: storageStates } = await supabase
+        .from('project_storage_state')
+        .select('project_id, location_mode, holder_node_id')
+        .in('project_id', projectIds)
+
+      const holderNodeIds = Array.from(new Set((storageStates ?? []).map((row) => typeof row.holder_node_id === 'string' ? row.holder_node_id : '').filter(Boolean)))
+      const holderNodeMap = new Map<string, { name?: string | null; node_key?: string | null }>()
+
+      if (holderNodeIds.length > 0) {
+        const { data: holderNodes } = await supabase
+          .from('storage_nodes')
+          .select('id, name, node_key')
+          .in('id', holderNodeIds)
+
+        for (const node of holderNodes ?? []) {
+          holderNodeMap.set(String(node.id), {
+            name: typeof node.name === 'string' ? node.name : null,
+            node_key: typeof node.node_key === 'string' ? node.node_key : null,
+          })
+        }
+      }
+
+      storageStateByProjectId = new Map((storageStates ?? []).map((row) => {
+        const holderNodeId = typeof row.holder_node_id === 'string' ? row.holder_node_id : null
+        const holderNode = holderNodeId ? holderNodeMap.get(holderNodeId) : null
+        return [String(row.project_id), {
+          location_mode: row.location_mode === 'node_local' ? 'node_local' : 'r2',
+          holder_node_id: holderNodeId,
+          holder_node_name: holderNode?.name ?? null,
+          holder_node_key: holderNode?.node_key ?? null,
+        }]
+      }))
+    }
+
     const projectsWithStats = await Promise.all((data ?? []).map(async (row) => {
       const projectId = String(row.id ?? '')
 
@@ -81,6 +119,7 @@ export async function GET() {
           canDelete: auth.role === 'super_admin' || isOwner,
           canManageAssignments: auth.role === 'super_admin' || isOwner,
         },
+        storage_state: storageStateByProjectId.get(projectId) ?? { location_mode: 'r2', holder_node_id: null, holder_node_name: null, holder_node_key: null },
       })
     }))
 
