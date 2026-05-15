@@ -148,7 +148,19 @@ async function ensureRegisteredNode(params: {
   publicBaseUrl: string | null
 }) {
   const existing = await loadRegisteredNode(params.requestOrigin)
-  if (existing) return existing
+  if (existing) {
+    const existingPublicBaseUrl = typeof existing.public_base_url === 'string' ? cleanUrl(String(existing.public_base_url)) : null
+    if (params.publicBaseUrl && params.publicBaseUrl !== existingPublicBaseUrl && typeof existing.id === 'string') {
+      const update = await supabase
+        .from('storage_nodes')
+        .update({ public_base_url: params.publicBaseUrl })
+        .eq('id', String(existing.id))
+        .select('*')
+        .maybeSingle()
+      if (!update.error && update.data) return update.data as Record<string, unknown>
+    }
+    return existing
+  }
   if (!params.canHoldProjectLocally || !params.publicBaseUrl) return null
 
   const attemptedKey = buildDerivedNodeKey()
@@ -227,25 +239,28 @@ export async function loadCurrentStorageNodeInfo(projectId: string, requestOrigi
   }
 
   const fallbackName = os.hostname()
-  const publicBaseUrl = cleanUrl(typeof registeredNode?.public_base_url === 'string' ? String(registeredNode.public_base_url) : '') || configuredPublicBaseUrl || effectiveOrigin
-  if (!publicBaseUrl) {
-    notes.push('No public base URL configured')
-  }
+  const preferredPublicBaseUrl = configuredPublicBaseUrl || effectiveOrigin
 
   const canHoldFromEnv = boolFromEnv(process.env.STORAGE_NODE_CAN_HOLD_LOCAL, isLocalDevelopment)
   const canHoldProjectLocally = typeof registeredNode?.can_hold_project_locally === 'boolean'
     ? Boolean(registeredNode.can_hold_project_locally)
     : canHoldFromEnv
 
-  if (!registeredNode) {
-    registeredNode = await ensureRegisteredNode({
-      requestOrigin,
-      canHoldProjectLocally,
-      publicBaseUrl,
-    })
-    if (!registeredNode && canHoldProjectLocally && publicBaseUrl) {
-      notes.push('Current node is not registered in storage_nodes')
-    }
+  registeredNode = await ensureRegisteredNode({
+    requestOrigin,
+    canHoldProjectLocally,
+    publicBaseUrl: preferredPublicBaseUrl,
+  })
+
+  const publicBaseUrl = configuredPublicBaseUrl
+    || cleanUrl(typeof registeredNode?.public_base_url === 'string' ? String(registeredNode.public_base_url) : '')
+    || effectiveOrigin
+  if (!publicBaseUrl) {
+    notes.push('No public base URL configured')
+  }
+
+  if (!registeredNode && canHoldProjectLocally && preferredPublicBaseUrl) {
+    notes.push('Current node is not registered in storage_nodes')
   }
 
   const healthStatus = typeof registeredNode?.health_status === 'string'
